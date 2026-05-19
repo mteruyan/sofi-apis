@@ -101,6 +101,10 @@ def api(request):
         return handle_consulta_ruc(request)
     elif path == "/busca_actividad":
         return handle_busca_actividad(request)
+    elif path == "/busca_carta_rechazada":
+        return handle_busca_carta_rechazada(request)
+    elif path == "/update_cg_rechazados":
+        return handle_update_cg_rechazados(request)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
@@ -1848,6 +1852,263 @@ def handle_busca_actividad(request):
         conn.close()
 
         return (json.dumps({"data_1": imprime, "mensaje": mensaje}, ensure_ascii=False), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# API: /busca-carta-rechazada
+# ─────────────────────────────────────────────
+def safe_read_csv(url, tries=3, delay=1):
+    import time
+    while tries > 0:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return response.text.splitlines()
+        except Exception:
+            pass
+        time.sleep(delay)
+        tries -= 1
+    return None
+
+
+def validar_consulta(celular, documento_intentado):
+    if not celular:
+        return {"status": True, "msg": "Consulta especial permitida"}
+
+    lima  = pytz.timezone("America/Lima")
+    ahora = datetime.now(lima)
+    ahora_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT * FROM sofi_control_consultas WHERE celular = %s", (celular,))
+    col_names = [desc[0] for desc in cur.description]
+    row = cur.fetchone()
+
+    if not row:
+        cur.execute("""
+            INSERT INTO sofi_control_consultas (celular, documento, fecha_creacion, intentos, bloqueado, fecha_ult_acceso)
+            VALUES (%s, %s, %s, 1, 0, %s)
+        """, (celular, documento_intentado, ahora_str, ahora_str))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"status": True, "msg": "Consulta permitida por primera vez"}
+
+    registro = dict(zip(col_names, row))
+
+    # Verificar si está bloqueado
+    if registro["bloqueado"] == 1:
+        fecha_bloqueo    = registro["fecha_ult_acceso"]
+        if hasattr(fecha_bloqueo, 'tzinfo') and fecha_bloqueo.tzinfo is None:
+            fecha_bloqueo = lima.localize(fecha_bloqueo)
+        fecha_desbloqueo = fecha_bloqueo + timedelta(days=7)
+        if ahora < fecha_desbloqueo:
+            cur.close()
+            conn.close()
+            return {
+                "status": False,
+                "msg": f"Celular bloqueado temporalmente. Intenta después de: {fecha_desbloqueo.strftime('%Y-%m-%d %H:%M:%S')}"
+            }
+        else:
+            cur.execute("UPDATE sofi_control_consultas SET bloqueado = 0, intentos = 0 WHERE celular = %s", (celular,))
+            conn.commit()
+            registro["bloqueado"] = 0
+            registro["intentos"]  = 0
+
+    # Validar si es el mismo día
+    fecha_ult_acceso = registro["fecha_ult_acceso"]
+    if hasattr(fecha_ult_acceso, 'date'):
+        fecha_ult_date = fecha_ult_acceso.date()
+    else:
+        fecha_ult_date = datetime.strptime(str(fecha_ult_acceso), "%Y-%m-%d %H:%M:%S").date()
+
+    if fecha_ult_date == ahora.date():
+        if registro["documento"] != documento_intentado:
+            intentos = registro["intentos"] + 1
+            if intentos > 3:
+                cur.execute("""
+                    UPDATE sofi_control_consultas
+                    SET bloqueado = 1, fecha_ult_acceso = %s
+                    WHERE celular = %s
+                """, (ahora_str, celular))
+                conn.commit()
+                cur.close()
+                conn.close()
+                return {"status": False, "msg": "Has excedido el número de intentos. Celular bloqueado por 7 días."}
+            cur.execute("""
+                UPDATE sofi_control_consultas
+                SET intentos = %s, fecha_ult_acceso = %s
+                WHERE celular = %s
+            """, (intentos, ahora_str, celular))
+            conn.commit()
+            cur.close()
+            conn.close()
+            return {"status": False, "msg": "Solo puedes consultar un documento por día."}
+
+        cur.execute("UPDATE sofi_control_consultas SET fecha_ult_acceso = %s WHERE celular = %s", (ahora_str, celular))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"status": True, "msg": "Consulta permitida (mismo documento del día)"}
+
+    # Nuevo día: resetear intentos
+    cur.execute("""
+        UPDATE sofi_control_consultas
+        SET documento = %s, intentos = 1, fecha_ult_acceso = %s
+        WHERE celular = %s
+    """, (documento_intentado, ahora_str, celular))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": True, "msg": "Consulta permitida (nuevo día)"}
+
+
+def handle_busca_carta_rechazada(request):
+    data    = request.get_json(silent=True) or {}
+    doi     = data.get("doi", "")
+    celular = data.get("celular", "")
+
+    if not doi:
+        return (json.dumps({"error": "El campo doi es obligatorio"}), 400, HEADERS)
+
+    try:
+        resultado_validacion = validar_consulta(celular, doi)
+        status = resultado_validacion["status"]
+        msg    = resultado_validacion["msg"]
+
+        id_           = ""; buscador = "vacio"; sol = ""; tipo_carta = ""
+        afiliado      = ""; prog = ""; ipress = ""; plan = ""; cobertura = ""
+        fecha_prog    = ""; estado = ""; monto = ""; usuario = ""; fecha_registro = ""
+        tipo_proceso  = ""; tipo_solicitud = ""; dni = ""; estado_f_i = ""
+        observacion   = ""; tipo_observ = ""; autonomia = ""; nro_celular = ""
+        medico_evaluador = ""; marca = ""; ia_obs = str(status)
+
+        if status:
+            url   = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=1727191727&single=true&output=csv&t={int(datetime.now().timestamp())}"
+            lines = safe_read_csv(url)
+
+            if lines:
+                import csv
+                last5000 = lines[max(0, len(lines) - 5000):]
+                reader   = csv.reader(last5000)
+
+                for row in reader:
+                    if not row:
+                        continue
+                    columna_documento = row[4].strip() if len(row) > 4 else ""
+                    if doi in columna_documento:
+                        id_              = row[0].strip()  if len(row) > 0  else ""
+                        buscador         = row[1].strip()  if len(row) > 1  else ""
+                        sol              = row[2].strip()  if len(row) > 2  else ""
+                        tipo_carta       = row[3].strip()  if len(row) > 3  else ""
+                        afiliado         = row[4].strip()  if len(row) > 4  else ""
+                        prog             = row[5].strip()  if len(row) > 5  else ""
+                        ipress           = row[6].strip()  if len(row) > 6  else ""
+                        plan             = row[7].strip()  if len(row) > 7  else ""
+                        cobertura        = row[8].strip()  if len(row) > 8  else ""
+                        fecha_prog       = row[9].strip()  if len(row) > 9  else ""
+                        estado           = row[10].strip() if len(row) > 10 else ""
+                        monto            = row[11].strip() if len(row) > 11 else ""
+                        usuario          = row[12].strip() if len(row) > 12 else ""
+                        fecha_registro   = row[13].strip() if len(row) > 13 else ""
+                        tipo_proceso     = row[14].strip() if len(row) > 14 else ""
+                        tipo_solicitud   = row[15].strip() if len(row) > 15 else ""
+                        dni              = row[16].strip() if len(row) > 16 else ""
+                        estado_intermedio= row[17].strip() if len(row) > 17 else ""
+                        estado_final     = row[18].strip() if len(row) > 18 else ""
+                        observacion      = row[19].strip() if len(row) > 19 else ""
+                        tipo_observ      = row[20].strip() if len(row) > 20 else ""
+                        autonomia        = row[21].strip() if len(row) > 21 else ""
+                        nro_celular      = row[25].strip() if len(row) > 25 else ""
+                        medico_evaluador = row[26].strip() if len(row) > 26 else ""
+                        marca            = row[33].strip() if len(row) > 33 else ""
+                        ia_obs           = row[35].strip() if len(row) > 35 else ""
+
+                        # Determinar estado final
+                        if not estado_final and not estado_intermedio:
+                            estado_f_i = "EN PROCESO"
+                        elif estado_final:
+                            estado_f_i = estado_final
+                        else:
+                            estado_f_i = estado_intermedio
+
+                        if not observacion:
+                            observacion = "Este campo por el momento esta vacío"
+
+        if buscador == "vacio":
+            observacion = "No existe información."
+            if not status:
+                observacion = msg
+
+        return (json.dumps({
+            "id":               id_,
+            "buscador":         buscador,
+            "sol":              sol,
+            "tipo_carta":       tipo_carta,
+            "afiliado":         afiliado,
+            "prog":             prog,
+            "ipress":           ipress,
+            "plan":             plan,
+            "cobertura":        cobertura,
+            "fecha_prog":       fecha_prog,
+            "estado":           estado,
+            "monto":            monto,
+            "usuario":          usuario,
+            "fecha_registro":   fecha_registro,
+            "tipo_proceso":     tipo_proceso,
+            "tipo_solicitud":   tipo_solicitud,
+            "dni":              dni,
+            "estado_final":     estado_f_i,
+            "observacion":      observacion,
+            "tipo_observ":      tipo_observ,
+            "autonomia":        autonomia,
+            "nro_celular":      nro_celular,
+            "medico_evaluador": medico_evaluador,
+            "marca":            marca,
+            "ia_obs":           ia_obs,
+        }, ensure_ascii=False), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# API: /update-cg-rechazados
+# ─────────────────────────────────────────────
+def handle_update_cg_rechazados(request):
+    data    = request.get_json(silent=True) or {}
+    doi     = data.get("doi", "")
+    campo   = data.get("campo", "")
+
+    if not doi:
+        return (json.dumps({"mensaje": "Error dato invalido"}), 400, HEADERS)
+
+    try:
+        lima  = pytz.timezone("America/Lima")
+        fecha = datetime.now(lima).strftime("%Y-%m-%d %H:%M:%S")
+
+        query  = ""
+        mensaje = ""
+
+        if campo == "ingreso_wsp":
+            query   = "UPDATE sofi_cg_rechazados SET ingreso_wsp='S', fecha_ingreso_wsp=%s WHERE nombre LIKE %s"
+            mensaje = f"Se actualizo el campo ingreso de whatsapp en: {doi}"
+
+        if campo == "hablar_asesor":
+            query   = "UPDATE sofi_cg_rechazados SET hablar_asesor='S', fecha_ingreso_wsp=%s WHERE nombre LIKE %s"
+            mensaje = f"Se actualizo el campo hablar con asesor en: {doi}"
+
+        if query:
+            conn = get_connection()
+            cur  = conn.cursor()
+            cur.execute(query, (fecha, f"%{doi}"))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        return (json.dumps({"mensaje": mensaje}, ensure_ascii=False), 200, HEADERS)
 
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, HEADERS)

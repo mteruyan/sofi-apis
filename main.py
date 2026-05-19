@@ -1780,7 +1780,7 @@ def levenshtein(s1, s2):
     return prev[-1]
 
 
-def handle_similar_texto(request):
+def handle_busca_actividad(request):
     data   = request.get_json(silent=True) or {}
     tipo   = data.get("tipo", "")
     palabra = data.get("palabra", "")

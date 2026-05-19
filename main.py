@@ -1865,6 +1865,7 @@ def safe_read_csv(url, tries=3, delay=1):
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
+                response.encoding = 'utf-8'
                 return response.text.splitlines()
         except Exception:
             pass

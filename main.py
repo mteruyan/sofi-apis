@@ -105,6 +105,16 @@ def api(request):
         return handle_busca_carta_rechazada(request)
     elif path == "/update_cg_rechazados":
         return handle_update_cg_rechazados(request)
+    elif path == "/envia_sms_leads_sctr":
+        return handle_envia_sms_leads_sctr(request)
+    elif path == "/envia_sms_leads_medicamentos":
+        return handle_envia_sms_leads_medicamentos(request)
+    elif path == "/envia_sms_leads_consultas":
+        return handle_envia_sms_leads_consultas(request)
+    elif path == "/envia_sctr_vencidos":
+        return handle_envia_sctr_vencidos(request)
+    elif path == "/recordatorio_sctr":
+        return handle_recordatorio_sctr(request)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
@@ -2110,6 +2120,271 @@ def handle_update_cg_rechazados(request):
             conn.close()
 
         return (json.dumps({"mensaje": mensaje}, ensure_ascii=False), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# HELPER GENERICO: envia SMS leads
+# Usado por: /envia-sms-leads-sctr,
+#            /envia-sms-leads-medicamentos,
+#            /envia-sms-leads-consultas
+# ─────────────────────────────────────────────
+def envia_sms_leads_generico(tabla, mensaje_template, aviso_descripcion):
+    lima       = pytz.timezone("America/Lima")
+    ahora      = datetime.now(lima)
+    dia_semana = ahora.isoweekday()  # 1=Lunes ... 7=Domingo
+
+    if not (1 <= dia_semana <= 6):
+        return "Fuera del horario"
+
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute(f"SELECT id, nombre, celular FROM {tabla} WHERE enviado='N'")
+    leads = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    if not leads:
+        return "No hay leads pendientes"
+
+    for id_lead, nombre, celular in leads:
+        numero = f"+{celular}"
+        nombre_limpio = re.sub(
+            r'[\U0001F300-\U0001F9FF\U00002600-\U000026FF'
+            r'\U00002700-\U000027BF\U0001F1E6-\U0001F1FF]',
+            '', nombre, flags=re.UNICODE
+        )
+        mensaje = mensaje_template.format(nombre=nombre_limpio)
+        payload = {
+            "NUM":  f" {numero}",
+            "TEXT": mensaje,
+            "URL":  "wa.me/51955973936"
+        }
+        headers = {
+            "Content-Type":  "application/json",
+            "Authorization": DANACONNECT_AUTH
+        }
+        try:
+            response = requests.post(DANACONNECT_URL, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+        except Exception as e:
+            print(f"Error al enviar SMS a {numero}: {e}")
+            continue
+
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute(f"UPDATE {tabla} SET enviado='S' WHERE id=%s", (id_lead,))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        sms_aviso(numero, aviso_descripcion)
+
+    return f"Enviado: {len(leads)} leads procesados"
+
+
+# ─────────────────────────────────────────────
+# API: /envia-sms-leads-sctr
+# ─────────────────────────────────────────────
+def handle_envia_sms_leads_sctr(request):
+    try:
+        mensaje = envia_sms_leads_generico(
+            tabla             = "sofi_leads_sctr",
+            mensaje_template  = "Sanitas SCTR: Hola {nombre}, ya estamos listos para ayudarte con tu consulta SCTR. Haz clic aqui",
+            aviso_descripcion = "lead sctr"
+        )
+        return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
+# API: /envia-sms-leads-medicamentos
+# ─────────────────────────────────────────────
+def handle_envia_sms_leads_medicamentos(request):
+    try:
+        mensaje = envia_sms_leads_generico(
+            tabla             = "sofi_leads_medicamentos",
+            mensaje_template  = "Sanitas Medicamentos: Hola {nombre}, ya estamos listos para ayudarte con tus medicamentos. Haz clic aqui",
+            aviso_descripcion = "lead medicamentos"
+        )
+        return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
+# API: /envia-sms-leads-consultas
+# ─────────────────────────────────────────────
+def handle_envia_sms_leads_consultas(request):
+    try:
+        mensaje = envia_sms_leads_generico(
+            tabla             = "sofi_leads_consultas",
+            mensaje_template  = "Sanitas Consultas: Hola {nombre}, ya estamos listos para ayudarte con tus consultas. Haz clic aqui",
+            aviso_descripcion = "lead consultas"
+        )
+        return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# TAREA: /recordatorio-sctr
+# ─────────────────────────────────────────────
+def lee_excel_rechazados():
+    import csv
+    import time
+
+    lima    = pytz.timezone("America/Lima")
+    ahora   = datetime.now(lima)
+    hoy_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Si es lunes, tomar anteayer; si no, tomar ayer
+    dias_atras = 2 if ahora.isoweekday() == 1 else 1
+    ayer = (ahora - timedelta(days=dias_atras)).strftime("%d/%m/%Y")
+
+    url = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=577147525&single=true&output=csv&t={int(time.time())}"
+
+    lines = safe_read_csv(url)
+    if not lines:
+        print("No se pudo leer el archivo, posiblemente está en actualización.")
+        return "Error lectura CSV"
+
+    last1000 = lines[max(0, len(lines) - 1000):]
+    reader   = csv.reader(last1000)
+
+    contador             = 0
+    contador_con_celular = 0
+    rows_to_insert       = []
+
+    for row in reader:
+        if not row:
+            continue
+
+        fecha_linea = row[23].strip() if len(row) > 23 else ""
+        row_2  = row[2].strip()  if len(row) > 2  else ""
+        row_4  = row[4].strip()  if len(row) > 4  else ""
+        row_21 = row[21].strip() if len(row) > 21 else ""
+        row_23 = row[23].strip() if len(row) > 23 else ""
+
+        if ayer in fecha_linea:
+            # Convertir fecha DD/MM/YYYY → YYYY-MM-DD
+            try:
+                fecha_rechazo = datetime.strptime(row_23, "%d/%m/%Y").strftime("%Y-%m-%d")
+            except ValueError:
+                fecha_rechazo = row_23
+
+            rows_to_insert.append((
+                row_2,          # sol
+                fecha_rechazo,  # fecha_rechazo
+                row_21,         # celular
+                row_4,          # nombre
+                hoy_str,        # fecha
+                "N",            # ingreso_wsp
+                None,           # fecha_ingreso_wsp
+                "N"             # hablar_asesor
+            ))
+
+            # Enviar SMS si tiene celular válido
+            if len(row_21) == 9 and row_21[0] == "9" and row_21 != "999999999":
+                nombre = row_4[:64] if len(row_4) > 64 else row_4
+                envia_sms_cartas_rechazadas(row_21, nombre)
+                contador_con_celular += 1
+
+            contador += 1
+
+    # Insertar registros en base de datos
+    if rows_to_insert:
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.executemany("""
+            INSERT INTO sofi_cg_rechazados
+                (sol, fecha_rechazo, celular, nombre, fecha, ingreso_wsp, fecha_ingreso_wsp, hablar_asesor)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, rows_to_insert)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    return f"Total: {contador} | Tienen celular: {contador_con_celular}"
+
+
+def envia_sms_sctr_vencidos(numero, ruc):
+    numero  = f"+{numero}"
+    mensaje = f"Sanitas SCTR: (RUC {ruc}) tu SCTR vence hoy. Evita las multas. Renueva aqui"
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "sctr vencidos")
+
+
+def handle_envia_sctr_vencidos(request):
+    try:
+        lima = pytz.timezone("America/Lima")
+        hoy  = datetime.now(lima).strftime("%Y-%m-%d")
+
+        conn = get_connection()
+        cur  = conn.cursor()
+
+        sincronizar_ruc_celular(cur)
+        conn.commit()
+
+        rucs = obtener_rucs_vencidos(cur, hoy)
+        if not rucs:
+            cur.close()
+            conn.close()
+            return (json.dumps({"mensaje": "No hay RUC con emisión vencida"}), 200, HEADERS)
+
+        cur.execute("""
+            SELECT ruc, celular FROM sctr_ruc_celular
+            WHERE ruc = ANY(%s)
+        """, (rucs,))
+        resultados = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        for ruc, celular in resultados:
+            envia_sms_sctr_vencidos(celular, ruc)
+
+        return (json.dumps({"mensaje": f"Todo OK: {len(resultados)} mensajes enviados"}), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+def handle_recordatorio_sctr(request):
+    try:
+        lima        = pytz.timezone("America/Lima")
+        ahora       = datetime.now(lima)
+        dia_semana  = ahora.isoweekday()
+        hora_actual = ahora.strftime("%H:%M")
+        hoy         = ahora.strftime("%Y-%m-%d")
+        ayer        = (ahora - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        ejecutados = []
+
+        # Recordatorio 3: vencidos ayer (08:25 - 08:35, lun-sab)
+        if 1 <= dia_semana <= 6 and "08:25" <= hora_actual <= "08:35":
+            cuenta = envia_sctr_vencidos_recordatorio3(hoy, ayer)
+            ejecutados.append(f"recordatorio3: {cuenta} enviados")
+
+        # Recordatorio 1: vencen hoy (11:25 - 11:35, lun-sab)
+        if 1 <= dia_semana <= 6 and "11:25" <= hora_actual <= "11:35":
+            cuenta = envia_sctr_vencidos_recordatorio1(hoy)
+            ejecutados.append(f"recordatorio1: {cuenta} enviados")
+
+        # Recordatorio 2: vencen hoy (14:55 - 15:05, lun-vie)
+        if 1 <= dia_semana <= 5 and "14:55" <= hora_actual <= "15:05":
+            cuenta = envia_sctr_vencidos_recordatorio2(hoy)
+            ejecutados.append(f"recordatorio2: {cuenta} enviados")
+
+        # Lee excel rechazados (12:10 - 12:20, lun-sab)
+        if 1 <= dia_semana <= 6 and "12:10" <= hora_actual <= "12:20":
+            resultado = lee_excel_rechazados()
+            ejecutados.append(f"excel_rechazados: {resultado}")
+
+        if not ejecutados:
+            return (json.dumps({"mensaje": "Fuera del horario"}), 200, HEADERS)
+
+        return (json.dumps({"mensaje": ", ".join(ejecutados)}), 200, HEADERS)
 
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, HEADERS)

@@ -4,3 +4,5 @@ pytz==2024.1
 google-auth==2.29.0
 requests==2.31.0
 google-cloud-storage==2.16.0
+jellyfish
+

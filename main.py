@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import functions_framework
 import re
 import requests
+from difflib import SequenceMatcher
+import jellyfish
 
 # ─────────────────────────────────────────────
 # CONEXIÓN

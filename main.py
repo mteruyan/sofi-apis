@@ -1,4 +1,6 @@
 import json
+import json
+import json
 import os
 import pytz
 import psycopg2
@@ -8,6 +10,11 @@ import re
 import requests
 from difflib import SequenceMatcher
 import jellyfish
+
+
+DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
+DANACONNECT_AUTH = "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+WHATSAPP_URL     = "wa.me/51955973936"
 
 # ─────────────────────────────────────────────
 # CONEXIÓN
@@ -832,7 +839,7 @@ def handle_inserta_bitacora_ivr(request):
                 data=payload,
                 headers={
                     "Content-Type":  "application/json",
-                    "Authorization": "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+                    "Authorization": DANACONNECT_AUTH
                 },
                 timeout=10
             )
@@ -1110,15 +1117,15 @@ def envia_sms_lead_sctr(numero, nombre, id_lead):
     payload = {
         "NUM":  f" {numero}",
         "TEXT": mensaje,
-        "URL":  "wa.me/51955973936"
+        "URL":  WHATSAPP_URL
     }
     headers = {
         "Content-Type":  "application/json",
-        "Authorization": "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+        "Authorization": DANACONNECT_AUTH
     }
     try:
         response = requests.post(
-            "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data",
+            WHATSAPP_URL,
             json=payload, headers=headers, timeout=30
         )
         response.raise_for_status()
@@ -1177,15 +1184,15 @@ def envia_sms_lead_medicamentos(numero, nombre, id_lead):
     payload = {
         "NUM":  f" {numero}",
         "TEXT": mensaje,
-        "URL":  "wa.me/51955973936"
+        "URL":  WHATSAPP_URL
     }
     headers = {
         "Content-Type":  "application/json",
-        "Authorization": "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+        "Authorization": DANACONNECT_AUTH
     }
     try:
         response = requests.post(
-            "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data",
+            DANACONNECT_URL,
             json=payload, headers=headers, timeout=30
         )
         response.raise_for_status()
@@ -1244,15 +1251,15 @@ def envia_sms_lead_consultas(numero, nombre, id_lead):
     payload = {
         "NUM":  f" {numero}",
         "TEXT": mensaje,
-        "URL":  "wa.me/51955973936"
+        "URL":  WHATSAPP_URL
     }
     headers = {
         "Content-Type":  "application/json",
-        "Authorization": "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+        "Authorization": DANACONNECT_AUTH
     }
     try:
         response = requests.post(
-            "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data",
+            DANACONNECT_URL,
             json=payload, headers=headers, timeout=30
         )
         response.raise_for_status()
@@ -1307,15 +1314,15 @@ def envia_sms_sctr_vencidos(numero, ruc):
     payload = {
         "NUM":  f" {numero}",
         "TEXT": mensaje,
-        "URL":  "wa.me/51955973936"
+        "URL":  WHATSAPP_URL
     }
     headers = {
         "Content-Type":  "application/json",
-        "Authorization": "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+        "Authorization": DANACONNECT_AUTH
     }
     try:
         response = requests.post(
-            "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data",
+            DANACONNECT_URL,
             json=payload, headers=headers, timeout=30
         )
         response.raise_for_status()
@@ -1329,9 +1336,6 @@ def envia_sms_sctr_vencidos(numero, ruc):
 # TAREA: /recordatorio-sctr
 # Helper: Danaconnect
 # ─────────────────────────────────────────────
-DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
-DANACONNECT_AUTH = "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
-WHATSAPP_URL     = "wa.me/51955973936"
 
 def enviar_danaconnect(numero, mensaje):
     payload = {
@@ -2064,7 +2068,7 @@ def envia_sms_leads_generico(tabla, mensaje_template, aviso_descripcion):
         payload = {
             "NUM":  f" {numero}",
             "TEXT": mensaje,
-            "URL":  "wa.me/51955973936"
+            "URL":  WHATSAPP_URL
         }
         headers = {
             "Content-Type":  "application/json",

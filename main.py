@@ -11,9 +11,8 @@ import requests
 from difflib import SequenceMatcher
 import jellyfish
 
-
 DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
-DANACONNECT_AUTH = "Basic Y2FuYWxlc0FQSUBzYW5pdGFzcGVydTpPcGVyYWNpb25lcyMwNA=="
+DANACONNECT_AUTH = os.environ["DANACONNECT_AUTH"]
 WHATSAPP_URL     = "wa.me/51955973936"
 
 # ─────────────────────────────────────────────

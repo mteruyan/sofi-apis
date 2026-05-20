@@ -111,10 +111,6 @@ def api(request):
         return handle_envia_sms_leads_medicamentos(request)
     elif path == "/envia_sms_leads_consultas":
         return handle_envia_sms_leads_consultas(request)
-    elif path == "/envia_sctr_vencidos":
-        return handle_envia_sctr_vencidos(request)
-    elif path == "/recordatorio_sctr":
-        return handle_recordatorio_sctr(request)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 

@@ -1325,59 +1325,6 @@ def envia_sms_sctr_vencidos(numero, ruc):
 
     sms_aviso(numero, "sctr vencidos")
 
-
-def handle_envia_sctr_vencidos(request):
-    try:
-        lima = pytz.timezone("America/Lima")
-        hoy  = datetime.now(lima).strftime("%Y-%m-%d")
-
-        conn = get_connection()
-        cur  = conn.cursor()
-
-        # Actualiza celulares capturados y los agrega a la tabla general ruc-celulares
-        cur.execute("""
-            INSERT INTO sctr_ruc_celular (ruc, celular)
-            SELECT t1.ruc, t1.celular
-            FROM sctr_empresa t1
-            LEFT JOIN sctr_ruc_celular t2
-                ON t1.ruc = t2.ruc AND t1.celular = t2.celular
-            WHERE t2.ruc IS NULL
-        """)
-        conn.commit()
-
-        # Buscar RUC con fin de vigencia vencida hoy
-        cur.execute("""
-            SELECT DISTINCT nro_doc
-            FROM sctr_emisiones
-            WHERE fin_vigencia = %s
-              AND fin_vigencia IS NOT NULL
-              AND nro_doc IS NOT NULL
-        """, (hoy,))
-        rucs_vencidos = [row[0] for row in cur.fetchall()]
-
-        if not rucs_vencidos:
-            cur.close()
-            conn.close()
-            return (json.dumps({"mensaje": "No hay RUC con emisión vencida"}), 200, HEADERS)
-
-        # Buscar celulares de esos RUC
-        cur.execute("""
-            SELECT ruc, celular
-            FROM sctr_ruc_celular
-            WHERE ruc = ANY(%s)
-        """, (rucs_vencidos,))
-        resultados = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        for ruc, celular in resultados:
-            envia_sms_sctr_vencidos(celular, ruc)
-
-        return (json.dumps({"mensaje": f"Todo OK: {len(resultados)} mensajes enviados"}), 200, HEADERS)
-
-    except Exception as e:
-        return (json.dumps({"error": str(e)}), 500, HEADERS)
-
 # ─────────────────────────────────────────────
 # TAREA: /recordatorio-sctr
 # Helper: Danaconnect
@@ -1512,44 +1459,6 @@ def envia_sctr_vencidos_recordatorio3(hoy, ayer):
         mensaje_template  = "Sanitas SCTR: Tu SCTR vencio y aun no renuevas. (RUC {ruc}). compra aqui",
         aviso_descripcion = "sctr vencidos recordatorio -1"
     )
-
-
-# ─────────────────────────────────────────────
-# HANDLER PRINCIPAL: /recordatorio-sctr
-# ─────────────────────────────────────────────
-def handle_recordatorio_sctr(request):
-    try:
-        lima       = pytz.timezone("America/Lima")
-        ahora      = datetime.now(lima)
-        dia_semana = ahora.isoweekday()   # 1=Lunes ... 7=Domingo
-        hora_actual = ahora.strftime("%H:%M")
-        hoy        = ahora.strftime("%Y-%m-%d")
-        ayer       = (ahora - timedelta(days=1)).strftime("%Y-%m-%d")
-
-        ejecutados = []
-
-        # Recordatorio 3: vencidos ayer (08:25 - 08:35, lun-sab)
-        if 1 <= dia_semana <= 6 and "08:25" <= hora_actual <= "08:35":
-            cuenta = envia_sctr_vencidos_recordatorio3(hoy, ayer)
-            ejecutados.append(f"recordatorio3: {cuenta} enviados")
-
-        # Recordatorio 1: vencen hoy (11:25 - 11:35, lun-sab)
-        if 1 <= dia_semana <= 6 and "11:25" <= hora_actual <= "11:35":
-            cuenta = envia_sctr_vencidos_recordatorio1(hoy)
-            ejecutados.append(f"recordatorio1: {cuenta} enviados")
-
-        # Recordatorio 2: vencen hoy (14:55 - 15:05, lun-vie)
-        if 1 <= dia_semana <= 5 and "14:55" <= hora_actual <= "15:05":
-            cuenta = envia_sctr_vencidos_recordatorio2(hoy)
-            ejecutados.append(f"recordatorio2: {cuenta} enviados")
-
-        if not ejecutados:
-            return (json.dumps({"mensaje": "Fuera del horario"}), 200, HEADERS)
-
-        return (json.dumps({"mensaje": ", ".join(ejecutados)}), 200, HEADERS)
-
-    except Exception as e:
-        return (json.dumps({"error": str(e)}), 500, HEADERS)
 
 # ─────────────────────────────────────────────
 # TAREA: /busca-ultimo-registro

@@ -1557,7 +1557,7 @@ def handle_busca_ultimo_registro(request):
 APISPERU_TOKEN = os.environ["APISPERU_TOKEN"]
 
 def handle_consulta_ruc(request):
-    data   = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     ruc    = data.get("ruc", "")
     celular_input = data.get("celular", "")
 

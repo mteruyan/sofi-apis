@@ -135,13 +135,13 @@ def convierte(texto):
 # API: /bitacora
 # ─────────────────────────────────────────────
 def handle_bitacora(request):
-    print("RAW BODY:", request.get_data(as_text=True))
-    print("CONTENT-TYPE:", request.content_type)
+    #print("RAW BODY:", request.get_data(as_text=True))
+    #print("CONTENT-TYPE:", request.content_type)
     
-    data = request.get_json(force=True, silent=True) or {}
-    print("DATA PARSEADA:", data)
+    #data = request.get_json(force=True, silent=True) or {}
+    #print("DATA PARSEADA:", data)
 
-    #data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) or {}
     message_id = data.get("message_id", "")
 
     if not message_id:

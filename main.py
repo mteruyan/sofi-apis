@@ -458,9 +458,15 @@ def handle_update_doi_direccion(request):
     distrito      = data.get("distrito", "").upper()
     direccion_nro = data.get("direccion_nro", 0)
 
+    # Conversión antes de las validaciones
+    try:
+        direccion_nro = int(direccion_nro)
+    except (ValueError, TypeError):
+        return (json.dumps({"error": "El campo direccion_nro debe ser un número"}), 400, HEADERS)
+
+    # Validaciones
     if not doi:
         return (json.dumps({"error": "El campo doi es obligatorio"}), 400, HEADERS)
-
     if direccion_nro not in [1, 2, 3]:
         return (json.dumps({"error": "El campo direccion_nro debe ser 1, 2 o 3"}), 400, HEADERS)
 
@@ -497,6 +503,13 @@ def handle_update_doi_distrito(request):
     va_nombre_o_ubigeo     = data.get("va_nombre_o_ubigeo", "")
     direccion_nro          = data.get("direccion_nro", 0)
 
+    # Conversión antes de las validaciones
+    try:
+        direccion_nro = int(direccion_nro)
+    except (ValueError, TypeError):
+        return (json.dumps({"error": "El campo direccion_nro debe ser un número"}), 400, HEADERS)
+
+    # Validaciones
     if not doi:
         return (json.dumps({"error": "El campo doi es obligatorio"}), 400, HEADERS)
 

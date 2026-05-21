@@ -181,7 +181,7 @@ def handle_bitacora(request):
 # API: /update_bitacora (UPDATE)
 # ─────────────────────────────────────────────
 def handle_update_bitacora(request):
-    data       = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     message_id = data.get("message_id", "")
     chat_id    = data.get("chat_id", "")
 
@@ -212,7 +212,7 @@ def handle_update_bitacora(request):
 # API: /whatsapp_busca_doi (SELECT)
 # ─────────────────────────────────────────────
 def handle_whatsapp_busca_doi(request):
-    data             = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     celular_consulta = data.get("celular_consulta", "")
 
     if not celular_consulta:
@@ -249,7 +249,7 @@ def handle_whatsapp_busca_doi(request):
 # API: /busca_doi_completo (SELECT)
 # ─────────────────────────────────────────────
 def handle_busca_doi_completo(request):
-    data             = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi              = data.get("doi", "")
     celular_consulta = data.get("celular_consulta", "")
 
@@ -377,7 +377,7 @@ def handle_busca_doi_completo(request):
 # API: /update_doi (INSERT si no existe)
 # ─────────────────────────────────────────────
 def handle_update_doi(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi  = data.get("doi", "")
 
     if not doi:
@@ -425,7 +425,7 @@ def handle_update_doi(request):
 # API: /update_escoge (UPDATE)
 # ─────────────────────────────────────────────
 def handle_update_escoge(request):
-    data   = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi    = data.get("doi", "")
     escoge = data.get("escoge", "")
 
@@ -452,7 +452,7 @@ def handle_update_escoge(request):
 # API: /update_doi_direccion (UPDATE)
 # ─────────────────────────────────────────────
 def handle_update_doi_direccion(request):
-    data          = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi           = data.get("doi", "")
     direccion     = data.get("direccion", "").upper()
     distrito      = data.get("distrito", "").upper()
@@ -491,7 +491,7 @@ def handle_update_doi_direccion(request):
 # API: /update_doi_distrito (UPDATE por nombre o ubigeo)
 # ─────────────────────────────────────────────
 def handle_update_doi_distrito(request):
-    data                   = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi                    = data.get("doi", "")
     nombre_ubigeo_distrito = data.get("nombre_ubigeo_distrito", "").strip()
     va_nombre_o_ubigeo     = data.get("va_nombre_o_ubigeo", "")
@@ -558,7 +558,7 @@ def handle_update_doi_distrito(request):
 # API: /listar_distritos (SELECT)
 # ─────────────────────────────────────────────
 def handle_listar_distritos(request):
-    data     = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     distrito = data.get("distrito", "").strip()
 
     if not distrito:
@@ -595,7 +595,7 @@ def handle_listar_distritos(request):
 # API: /trae_escoge (SELECT)
 # ─────────────────────────────────────────────
 def handle_trae_escoge(request):
-    data             = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi              = data.get("doi", "")
     celular_consulta = data.get("celular_consulta", "")
 
@@ -692,7 +692,7 @@ def handle_trae_escoge(request):
 # API: /inserta_bitacora_ivr (INSERT + Storage + Danaconnect)
 # ─────────────────────────────────────────────
 def handle_inserta_bitacora_ivr(request):
-    data               = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     message_id         = data.get("message_id", "")
     chat_id            = data.get("chat_id", "")
     channel_identifier = data.get("channel_identifier", "")
@@ -852,7 +852,7 @@ def handle_inserta_bitacora_ivr(request):
 # API: /lead-medicamentos
 # ─────────────────────────────────────────────
 def handle_lead_medicamentos(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     nombre  = data.get("nombre", "")
     celular = data.get("celular", "")
     if not nombre:
@@ -877,7 +877,7 @@ def handle_lead_medicamentos(request):
 # API: /lead-sctr
 # ─────────────────────────────────────────────
 def handle_lead_sctr(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     nombre  = data.get("nombre", "")
     celular = data.get("celular", "")
     if not nombre:
@@ -902,7 +902,7 @@ def handle_lead_sctr(request):
 # API: /lead-consultas
 # ─────────────────────────────────────────────
 def handle_lead_consultas(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     nombre  = data.get("nombre", "")
     celular = data.get("celular", "")
     if not nombre:
@@ -927,7 +927,7 @@ def handle_lead_consultas(request):
 # API: /busca-doi-potestativo
 # ─────────────────────────────────────────────
 def handle_busca_doi_potestativo(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi = data.get("doi", "")
     if not doi:
         return (json.dumps({"mensaje": "Error dato invalido"}), 400, HEADERS)
@@ -1020,7 +1020,7 @@ def handle_busca_doi_potestativo(request):
 # API: /busca-doi-potestativo-carta
 # ─────────────────────────────────────────────
 def handle_busca_doi_potestativo_carta(request):
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi = data.get("doi", "")
     if not doi:
         return (json.dumps({"mensaje": "Error dato invalido"}), 400, HEADERS)
@@ -1540,7 +1540,8 @@ def handle_busca_ultimo_registro(request):
 # ─────────────────────────────────────────────
 # API: /consulta-ruc
 # ─────────────────────────────────────────────
-APISPERU_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Im10ZXJ1eWFuQGdtYWlsLmNvbSJ9.bloeaPJiZxGFIaWj2PXMMktf8BBdiOO340Ki6YCYHkg"
+
+APISPERU_TOKEN = os.environ["APISPERU_TOKEN"]
 
 def handle_consulta_ruc(request):
     data   = request.get_json(silent=True) or {}
@@ -1705,7 +1706,7 @@ def levenshtein(s1, s2):
 
 
 def handle_busca_actividad(request):
-    data   = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     tipo   = data.get("tipo", "")
     palabra = data.get("palabra", "")
     ruc    = data.get("ruc", "")
@@ -1886,7 +1887,7 @@ def validar_consulta(celular, documento_intentado):
 
 
 def handle_busca_carta_rechazada(request):
-    data    = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi     = data.get("doi", "")
     celular = data.get("celular", "")
 
@@ -1997,7 +1998,7 @@ def handle_busca_carta_rechazada(request):
 # API: /update-cg-rechazados
 # ─────────────────────────────────────────────
 def handle_update_cg_rechazados(request):
-    data    = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     doi     = data.get("doi", "")
     campo   = data.get("campo", "")
 

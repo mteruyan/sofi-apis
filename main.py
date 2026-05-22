@@ -499,7 +499,7 @@ def handle_update_doi_direccion(request):
 def handle_update_doi_distrito(request):
     data = request.get_json(force=True, silent=True) or {}
     doi                    = data.get("doi", "")
-    nombre_ubigeo_distrito = data.get("nombre_ubigeo_distrito", "").strip()
+    nombre_ubigeo_distrito = data.get("nombre_ubigeo_distrito", "").strip().upper()
     va_nombre_o_ubigeo     = data.get("va_nombre_o_ubigeo", "")
     direccion_nro          = data.get("direccion_nro", 0)
 

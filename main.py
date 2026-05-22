@@ -572,7 +572,7 @@ def handle_update_doi_distrito(request):
 # ─────────────────────────────────────────────
 def handle_listar_distritos(request):
     data = request.get_json(force=True, silent=True) or {}
-    distrito = data.get("distrito", "").strip()
+    distrito = data.get("distrito", "").strip().upper()
 
     if not distrito:
         return (json.dumps({"error": "El campo distrito es obligatorio"}), 400, HEADERS)
@@ -634,14 +634,14 @@ def handle_trae_escoge(request):
         row = cur.fetchone()
 
         if row:
-            nombres       = row[0].title()  if row[0]  else ""
-            apellidos     = row[1].title()  if row[1]  else ""
-            direccion1    = row[2].title()  if row[2]  else ""
-            distrito1     = row[3].title()  if row[3]  else ""
-            direccion2    = row[4].title()  if row[4]  else ""
-            distrito2     = row[5].title()  if row[5]  else ""
-            direccion3    = row[6].title()  if row[6]  else ""
-            distrito3     = row[7].title()  if row[7]  else ""
+            nombres       = row[0].upper()  if row[0]  else ""
+            apellidos     = row[1].upper()  if row[1]  else ""
+            direccion1    = row[2].upper()  if row[2]  else ""
+            distrito1     = row[3].upper()  if row[3]  else ""
+            direccion2    = row[4].upper()  if row[4]  else ""
+            distrito2     = row[5].upper()  if row[5]  else ""
+            direccion3    = row[6].upper()  if row[6]  else ""
+            distrito3     = row[7].upper()  if row[7]  else ""
             nro_contacto1 = row[8]  or ""
             nro_contacto2 = row[9]  or ""
             email         = row[10] or ""
@@ -715,10 +715,10 @@ def handle_inserta_bitacora_ivr(request):
     last_user_input    = data.get("first_user_input", "")
     opcion             = data.get("opcion", "")
     doi                = data.get("doi", "")
-    nombres            = data.get("nombres", "")
-    apellidos          = data.get("apellidos", "")
-    direccion          = data.get("direccion", "")
-    distrito           = data.get("distrito", "")
+    nombres            = data.get("nombres", "").upper()
+    apellidos          = data.get("apellidos", "").upper()
+    direccion          = data.get("direccion", "").upper()
+    distrito           = data.get("distrito", "").upper()
     contacto           = data.get("contacto", "")
     url                = data.get("url", "")
 

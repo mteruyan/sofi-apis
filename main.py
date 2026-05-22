@@ -598,7 +598,7 @@ def handle_listar_distritos(request):
 
         return (json.dumps({
             "mensaje":  imprime,
-            "contador": contador,
+            "contador": str(contador),
         }), 200, HEADERS)
 
     except Exception as e:
@@ -838,7 +838,7 @@ def handle_inserta_bitacora_ivr(request):
                 "DOI":             doi,
                 "NOMBRES":         nombres,
                 "APELLIDOS":       apellidos,
-                "EMAIL":           "sofimedicamentos@sanitasperu.com",
+                "EMAIL":           "mteruya@sanitasperu.com",
                 "DIRECCION":       direccion,
                 "DISTRITO":        distrito,
                 "CONTACTO":        nro_contacto1,

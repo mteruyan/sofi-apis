@@ -741,20 +741,20 @@ def handle_inserta_bitacora_ivr(request):
             """, (doi,))
             row = cur.fetchone()
             if row:
-                nombres       = row[0].title() if row[0] else nombres
-                apellidos     = row[1].title() if row[1] else apellidos
+                nombres       = row[0].upper() if row[0] else nombres
+                apellidos     = row[1].upper() if row[1] else apellidos
                 escoge        = str(row[11])   if row[11] else "1"
                 nro_contacto1 = row[8] or ""
 
                 if escoge in ["1", ""]:
-                    direccion = row[2].title() if row[2] else ""
-                    distrito  = row[3].title() if row[3] else ""
+                    direccion = row[2].upper() if row[2] else ""
+                    distrito  = row[3].upper() if row[3] else ""
                 elif escoge == "2":
-                    direccion = row[4].title() if row[4] else ""
-                    distrito  = row[5].title() if row[5] else ""
+                    direccion = row[4].upper() if row[4] else ""
+                    distrito  = row[5].upper() if row[5] else ""
                 elif escoge == "3":
-                    direccion = row[6].title() if row[6] else ""
-                    distrito  = row[7].title() if row[7] else ""
+                    direccion = row[6].upper() if row[6] else ""
+                    distrito  = row[7].upper() if row[7] else ""
 
         # ── 2. Descarga archivo y sube a Cloud Storage ───────────────────────
         try:

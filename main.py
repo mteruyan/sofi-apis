@@ -117,6 +117,14 @@ def api(request):
         return handle_envia_sms_leads_medicamentos(request)
     elif path == "/envia_sms_leads_consultas":
         return handle_envia_sms_leads_consultas(request)
+    elif path == "/recordatorio_sctr_3":
+        return handle_recordatorio_sctr_3(request)
+    elif path == "/recordatorio_sctr_1":
+        return handle_recordatorio_sctr_1(request)
+    elif path == "/recordatorio_sctr_2":
+        return handle_recordatorio_sctr_2(request)
+    elif path == "/excel_rechazados":
+        return handle_excel_rechazados(request)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
@@ -2307,6 +2315,70 @@ def handle_recordatorio_sctr(request):
             return (json.dumps({"mensaje": "Fuera del horario"}), 200, HEADERS)
 
         return (json.dumps({"mensaje": ", ".join(ejecutados)}), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# TAREA 1: Recordatorio 3 - Vencidos ayer
+# Cloud Scheduler: 08:25, lun-sab (1-6)
+# ─────────────────────────────────────────────
+def handle_recordatorio_sctr_3(request):
+    try:
+        lima        = pytz.timezone("America/Lima")
+        ahora       = datetime.now(lima)
+        hoy         = ahora.strftime("%Y-%m-%d")
+        ayer        = (ahora - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        cuenta = envia_sctr_vencidos_recordatorio3(hoy, ayer)
+        return (json.dumps({"mensaje": f"recordatorio3: {cuenta} enviados"}), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
+# TAREA 2: Recordatorio 1 - Vencen hoy
+# Cloud Scheduler: 11:25, lun-sab (1-6)
+# ─────────────────────────────────────────────
+def handle_recordatorio_sctr_1(request):
+    try:
+        lima        = pytz.timezone("America/Lima")
+        ahora       = datetime.now(lima)
+        hoy         = ahora.strftime("%Y-%m-%d")
+
+        cuenta = envia_sctr_vencidos_recordatorio1(hoy)
+        return (json.dumps({"mensaje": f"recordatorio1: {cuenta} enviados"}), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
+# TAREA 3: Recordatorio 2 - Vencen hoy (tarde)
+# Cloud Scheduler: 14:55, lun-vie (1-5)
+# ─────────────────────────────────────────────
+def handle_recordatorio_sctr_2(request):
+    try:
+        lima        = pytz.timezone("America/Lima")
+        ahora       = datetime.now(lima)
+        hoy         = ahora.strftime("%Y-%m-%d")
+
+        cuenta = envia_sctr_vencidos_recordatorio2(hoy)
+        return (json.dumps({"mensaje": f"recordatorio2: {cuenta} enviados"}), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
+# TAREA 4: Lee Excel Rechazados
+# Cloud Scheduler: 12:10, lun-sab (1-6)
+# ─────────────────────────────────────────────
+def handle_excel_rechazados(request):
+    try:
+        resultado = lee_excel_rechazados()
+        return (json.dumps({"mensaje": f"excel_rechazados: {resultado}"}), 200, HEADERS)
 
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, HEADERS)

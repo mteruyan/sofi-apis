@@ -1413,7 +1413,7 @@ def obtener_celulares_sin_agente(cur, rucs, fechas_filtro):
           AND src.celular NOT IN (
               SELECT DISTINCT user_identifier
               FROM sofi_ivr
-              WHERE DATE(fecha) = ANY(%s)
+              WHERE DATE(fecha) = ANY(%s::date[])
                 AND opcion = 'SCTR hablar con agente'
           )
     """, (rucs, fechas_filtro))

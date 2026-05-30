@@ -855,7 +855,7 @@ def handle_inserta_bitacora_ivr(request):
                 "ID_CHAT":         chat_id
             })
             req.post(
-                "https://appserv.danaconnect.com/api/1.0/rest/conversation/553927/start/data",
+                "https://appserv.danaconnect.com/api/1.0/rest/conversation/586273/start/data",
                 data=payload,
                 headers={
                     "Content-Type":  "application/json",
@@ -2157,6 +2157,15 @@ def handle_envia_sms_leads_consultas(request):
         return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# ENVIO: Cartas Rechazadas
+# ─────────────────────────────────────────────	
+def envia_sms_cartas_rechazadas(numero, nombre):
+    numero  = f"+51{numero}"
+    mensaje = f"Sanitas: {nombre}, tu carta fue rechazada. +info en Consultas Generales / Estado de Carta de Garantia"
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "carta rechazada")
 
 # ─────────────────────────────────────────────
 # TAREA: /recordatorio-sctr

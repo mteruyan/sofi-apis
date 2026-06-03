@@ -11,7 +11,7 @@ import requests
 from difflib import SequenceMatcher
 import jellyfish
 
-DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/586630/start/data"
+DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
 DANACONNECT_AUTH = os.environ["DANACONNECT_AUTH"]
 WHATSAPP_URL     = "wa.me/51955973936"
 
@@ -855,7 +855,7 @@ def handle_inserta_bitacora_ivr(request):
                 "ID_CHAT":         chat_id
             })
             req.post(
-                "https://appserv.danaconnect.com/api/1.0/rest/conversation/586273/start/data",
+                "https://appserv.danaconnect.com/api/1.0/rest/conversation/586630/start/data",
                 data=payload,
                 headers={
                     "Content-Type":  "application/json",

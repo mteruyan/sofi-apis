@@ -1,1 +1,1 @@
-web: functions-framework --target=api --port=$PORT
+web: functions-framework --target=api --port=8080

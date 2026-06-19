@@ -10,6 +10,13 @@ import re
 import requests
 from difflib import SequenceMatcher
 import jellyfish
+from sctr_forms import handle_sctr_form, handle_sctr_submit, handle_sctr_crear_grupo
+from sctr_whatsapp import handle_sctr_resumen_whatsapp, handle_sctr_excel_whatsapp, handle_sctr_borrar_empleado
+from admision_forms import handle_admision_sctr_nuevo, handle_admision_sctr_continuidad, handle_admision_eps_nuevo
+
+# ─────────────────────────────────────────────
+# VARIABLES
+# ─────────────────────────────────────────────
 
 DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
 DANACONNECT_AUTH = os.environ["DANACONNECT_AUTH"]
@@ -53,8 +60,14 @@ HEADERS = {
 def api(request):
     if request.method == "OPTIONS":
         return ("", 204, HEADERS)
+
+    # ── REDIRECT RAÍZ ──────────────────────────────
+    if request.path == "/" or request.path == "":
+        from flask import redirect
+        return redirect("https://www.sanitasperu.com", code=301)
+    # ───────────────────────────────────────────────
     
-    if not validar_api_key(request):
+    if not request.path.startswith("/sctr/") and not validar_api_key(request):
         return (json.dumps({"error": "API Key invalida"}), 401, HEADERS)
 
     path = request.path.rstrip("/")
@@ -87,6 +100,8 @@ def api(request):
         return handle_lead_sctr(request)
     elif path == "/lead_consultas":
         return handle_lead_consultas(request)
+    elif path == "/lead_pases":
+        return handle_lead_pases(request)
     elif path == "/busca_doi_potestativo":
         return handle_busca_doi_potestativo(request)
     elif path == "/busca_doi_potestativo_carta":
@@ -97,6 +112,8 @@ def api(request):
         return handle_envia_sms_leads_medicamentos(request)
     elif path == "/envia_sms_leads_consultas":
         return handle_envia_sms_leads_consultas(request)
+    elif path == "/envia_sms_leads_pases":
+        return handle_envia_sms_leads_pases(request)
     elif path == "/envia_sctr_vencidos":
         return handle_envia_sctr_vencidos(request)
     elif path == "/recordatorio_sctr":
@@ -105,18 +122,14 @@ def api(request):
         return handle_busca_ultimo_registro(request)
     elif path == "/consulta_ruc":
         return handle_consulta_ruc(request)
+    elif path == "/consulta_ruc2":
+        return handle_consulta_ruc2(request)
     elif path == "/busca_actividad":
         return handle_busca_actividad(request)
     elif path == "/busca_carta_rechazada":
         return handle_busca_carta_rechazada(request)
     elif path == "/update_cg_rechazados":
         return handle_update_cg_rechazados(request)
-    elif path == "/envia_sms_leads_sctr":
-        return handle_envia_sms_leads_sctr(request)
-    elif path == "/envia_sms_leads_medicamentos":
-        return handle_envia_sms_leads_medicamentos(request)
-    elif path == "/envia_sms_leads_consultas":
-        return handle_envia_sms_leads_consultas(request)
     elif path == "/recordatorio_sctr_3":
         return handle_recordatorio_sctr_3(request)
     elif path == "/recordatorio_sctr_1":
@@ -125,6 +138,26 @@ def api(request):
         return handle_recordatorio_sctr_2(request)
     elif path == "/excel_rechazados":
         return handle_excel_rechazados(request)
+    elif path.startswith("/sctr/") and request.method == "GET" and len(path.split("/")) == 3:
+        codigo = path.split("/")[2]
+        return handle_sctr_form(request, codigo)
+    elif path.startswith("/sctr/") and path.endswith("/submit") and request.method == "POST":
+        codigo = path.split("/")[2]
+        return handle_sctr_submit(request, codigo)
+    elif path == "/sctr/crear_grupo":
+        return handle_sctr_crear_grupo(request)
+    elif path == "/sctr/whatsapp/resumen" and request.method == "POST":
+        return handle_sctr_resumen_whatsapp(request)
+    elif path == "/sctr/whatsapp/excel" and request.method == "POST":
+        return handle_sctr_excel_whatsapp(request)
+    elif path == "/sctr/whatsapp/borrar" and request.method == "POST":
+        return handle_sctr_borrar_empleado(request)
+    elif path == "/admision/sctr_nuevo" and request.method == "POST":
+        return handle_admision_sctr_nuevo(request)
+    elif path == "/admision/sctr_continuidad" and request.method == "POST":
+        return handle_admision_sctr_continuidad(request)
+    elif path == "/admision/eps_nuevo" and request.method == "POST":
+        return handle_admision_eps_nuevo(request)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
@@ -241,8 +274,8 @@ def handle_whatsapp_busca_doi(request):
         cur.close()
         conn.close()
 
-        if row:
-            doi      = row[0].title() if row[0] else ""
+        if row and row[0]:
+            doi      = row[0].title()
             contador = 1
         else:
             doi      = ""
@@ -945,6 +978,32 @@ def handle_lead_consultas(request):
         return (json.dumps({"error": str(e)}), 500, HEADERS)
 
 # ─────────────────────────────────────────────
+# API: /lead-pases-atencion
+# ─────────────────────────────────────────────
+def handle_lead_pases(request):
+    data = request.get_json(force=True, silent=True) or {}
+    nombre  = data.get("nombre", "")
+    celular = data.get("celular", "")
+    if not nombre:
+        return (json.dumps({"mensaje": "Error dato invalido"}), 400, HEADERS)
+    try:
+        lima  = pytz.timezone("America/Lima")
+        fecha = datetime.now(lima).strftime('%Y-%m-%d %H:%M:%S')
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            INSERT INTO sofi_leads_pases (nombre, celular, fecha, enviado)
+            VALUES (%s, %s, %s, 'N')
+        """, (nombre, celular, fecha))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return (json.dumps({"mensaje": "Registro ingresado OK"}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ─────────────────────────────────────────────
 # API: /busca-doi-potestativo
 # ─────────────────────────────────────────────
 def handle_busca_doi_potestativo(request):
@@ -1258,6 +1317,44 @@ def handle_envia_sms_leads_medicamentos(request):
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, HEADERS)
 
+# ─────────────────────────────────────────────
+# TAREA: /envia_sms_lead_pases
+# ─────────────────────────────────────────────
+def envia_sms_lead_pases(numero, nombre, id_lead):
+    nombre_limpio = re.sub(
+        r'[\U0001F300-\U0001F9FF\U00002600-\U000026FF'
+        r'\U00002700-\U000027BF\U0001F1E6-\U0001F1FF]',
+        '', nombre, flags=re.UNICODE
+    )
+    mensaje = f"Sanitas Pases: Hola {nombre_limpio}, ya estamos listos para ayudarte con tu pases de atencion. Haz clic aqui"
+    payload = {
+        "NUM":  f" {numero}",
+        "TEXT": mensaje,
+        "URL":  WHATSAPP_URL
+    }
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": DANACONNECT_AUTH
+    }
+    try:
+        response = requests.post(
+            DANACONNECT_URL,
+            json=payload, headers=headers, timeout=30
+        )
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error al enviar SMS a {numero}: {e}")
+        return
+
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("UPDATE sofi_leads_pases SET enviado='S' WHERE id=%s", (id_lead,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    sms_aviso(numero, "Pase de atencion")
+    
 # ─────────────────────────────────────────────
 # TAREA: /envia-sms-leads-consultas
 # ─────────────────────────────────────────────
@@ -1662,6 +1759,121 @@ def handle_consulta_ruc(request):
             "actividad":        actividad,
             "fecha_ult_acceso": fecha_ult_acceso,
             "tiene_actividad":  tiene_actividad,
+        }, ensure_ascii=False), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# API: /consulta-ruc_2
+# ─────────────────────────────────────────────
+def handle_consulta_ruc2(request):
+    data = request.get_json(force=True, silent=True) or {}
+    ruc           = data.get("ruc", "").strip()
+    celular_input = data.get("celular", "").strip()
+
+    if not ruc:
+        return (json.dumps({"error": "El campo ruc es obligatorio"}), 400, HEADERS)
+
+    try:
+        lima  = pytz.timezone("America/Lima")
+        ahora = datetime.now(lima).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT * FROM sctr_empresa WHERE ruc = %s", (ruc,))
+        col_names = [desc[0] for desc in cur.description]
+        row = cur.fetchone()
+
+        if not row:
+            try:
+                resp = requests.get(
+                    f"https://dniruc.apisperu.com/api/v1/ruc/{ruc}?token={APISPERU_TOKEN}",
+                    timeout=10
+                )
+                obj = resp.json()
+            except Exception as e:
+                cur.close(); conn.close()
+                return (json.dumps({"error": f"Error consultando API RUC: {str(e)}"}), 500, HEADERS)
+
+            razon_social = obj.get("razonSocial", "")
+            direccion    = obj.get("direccion", "")
+            distrito     = obj.get("distrito", "")
+            provincia    = obj.get("provincia", "")
+            departamento = obj.get("departamento", "")
+            correo       = ""
+            actividad    = ""
+
+            if razon_social:
+                cur.execute("""
+                    INSERT INTO sctr_empresa
+                        (ruc, razon_social, celular, direccion, departamento, provincia, distrito, fecha_creacion, fecha_ult_acceso)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (ruc, razon_social, celular_input, direccion, departamento, provincia, distrito, ahora, ahora))
+                conn.commit()
+
+        else:
+            fila         = dict(zip(col_names, row))
+            razon_social = fila.get("razon_social", "")
+            correo       = fila.get("correo", "")
+            direccion    = fila.get("direccion", "")
+            departamento = fila.get("departamento", "")
+            provincia    = fila.get("provincia", "")
+            distrito     = fila.get("distrito", "")
+            actividad    = fila.get("actividad", "")
+
+            if fila.get("celular", "") != celular_input:
+                cur.execute("""
+                    UPDATE sctr_empresa SET celular = %s, fecha_ult_acceso = %s WHERE ruc = %s
+                """, (celular_input, ahora, ruc))
+            else:
+                cur.execute("""
+                    UPDATE sctr_empresa SET fecha_ult_acceso = %s WHERE ruc = %s
+                """, (ahora, ruc))
+            conn.commit()
+
+        # ── GRUPO Y LINK ──────────────────────────────────────────
+        cur.execute("""
+            SELECT codigo, comprador_telefono
+            FROM sctr_grupos
+            WHERE ruc = %s AND comprador_telefono = %s
+            ORDER BY id DESC
+            LIMIT 1
+        """, (ruc, celular_input))
+        grupo_existente = cur.fetchone()
+
+        if grupo_existente and (grupo_existente[1] or "")[-9:] == celular_input[-9:]:
+            codigo      = grupo_existente[0]
+            grupo_nuevo = False
+        else:
+            import random, string
+            codigo = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
+            cur.execute("""
+                INSERT INTO sctr_grupos (codigo, empresa, ruc, comprador_telefono)
+                VALUES (%s, %s, %s, %s)
+            """, (codigo, razon_social.strip().upper(), ruc, celular_input))
+            conn.commit()
+            grupo_nuevo = True
+
+        cur.close()
+        conn.close()
+
+        base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+
+        return (json.dumps({
+            "ruc":             ruc,
+            "razon_social":    razon_social,
+            "celular":         celular_input,
+            "correo":          correo,
+            "direccion":       direccion,
+            "departamento":    departamento,
+            "provincia":       provincia,
+            "distrito":        distrito,
+            "actividad":       actividad,
+            "tiene_actividad": "S" if actividad else "N",
+            "codigo":          codigo,
+            "link":            f"{base_url}/sctr/{codigo}",
+            "grupo_nuevo":     grupo_nuevo,
         }, ensure_ascii=False), 200, HEADERS)
 
     except Exception as e:
@@ -2153,6 +2365,20 @@ def handle_envia_sms_leads_consultas(request):
             tabla             = "sofi_leads_consultas",
             mensaje_template  = "Sanitas Consultas: Hola {nombre}, ya estamos listos para ayudarte con tus consultas. Haz clic aqui",
             aviso_descripcion = "lead consultas"
+        )
+        return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+# ─────────────────────────────────────────────
+# API: /envia-sms-leads-pases
+# ─────────────────────────────────────────────
+def handle_envia_sms_leads_pases(request):
+    try:
+        mensaje = envia_sms_leads_generico(
+            tabla             = "sofi_leads_pases",
+            mensaje_template  = "Sanitas Pases: Hola {nombre}, ya estamos listos para ayudarte con tu pase de atencion. Haz clic aqui",
+            aviso_descripcion = "lead pases"
         )
         return (json.dumps({"mensaje": mensaje}), 200, HEADERS)
     except Exception as e:

@@ -5,4 +5,7 @@ google-auth==2.29.0
 requests==2.31.0
 google-cloud-storage==2.16.0
 jellyfish
-
+cloud-sql-python-connector==1.9.0
+pg8000==1.31.2
+SQLAlchemy==2.0.30
+openpyxl==3.1.5

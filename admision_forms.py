@@ -13,6 +13,14 @@ import os
 import psycopg2
 import pytz
 from datetime import datetime
+import base64
+import logging
+import requests
+
+# ─────────────────────────────────────────────
+# VARIABLES
+# ─────────────────────────────────────────────
+CORREO_DESTINO = "mteruya@sanitasperu.com"
 
 HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -122,6 +130,10 @@ def handle_admision_sctr_nuevo(request):
         cur.close()
         conn.close()
 
+        if request.args.get("origen") == "web":
+            correo_destino = CORREO_DESTINO
+            _enviar_correo_admision("SCTR_NUEVO", _payload_sctr_nuevo(data, correo_destino))
+
         return (json.dumps({
             "ok":            True,
             "formulario_id": formulario_id,
@@ -178,6 +190,10 @@ def handle_admision_sctr_continuidad(request):
         cur.close()
         conn.close()
 
+        if request.args.get("origen") == "web":
+            correo_destino = CORREO_DESTINO
+            _enviar_correo_admision("SCTR_CONTINUIDAD", _payload_sctr_nuevo(data, correo_destino))
+
         return (json.dumps({
             "ok":            True,
             "formulario_id": formulario_id,
@@ -225,6 +241,10 @@ def handle_admision_eps_nuevo(request):
         conn.commit()
         cur.close()
         conn.close()
+
+        if request.args.get("origen") == "web":
+            correo_destino = CORREO_DESTINO
+            _enviar_correo_admision("EPS_NUEVO", _payload_sctr_nuevo(data, correo_destino))
 
         return (json.dumps({
             "ok":            True,
@@ -346,3 +366,101 @@ def handle_admision_consulta(request):
 
     except Exception as e:
         return (json.dumps({"ok": False, "error": str(e)}), 500, HEADERS)
+
+def _payload_eps_nuevo(data, correo_destino):
+    return {
+        "NOMBRE_CLINICA": data.get("clinica", ""),
+        "TELEFONO_CLINICA": data.get("telefono_clinica", ""),
+        "EMAIL_CLINICA": data.get("correo_clinica", ""),
+        "NOMBRE_ADMISIONISTA": data.get("nombre_admisionista", ""),
+        "DOI_PACIENTE": data.get("dni_paciente", ""),
+        "NOMBRE_PACIENTE": data.get("nombre_paciente", ""),
+        "CELULAR_PACIENTE": data.get("celular_paciente", ""),
+        "ESPECIALIDAD": data.get("especialidad", ""),
+        "CORREO_DESTINO": correo_destino,
+    }
+
+def _payload_sctr_nuevo(data, correo_destino):
+    return {
+        "NOMBRE_CLINICA": data.get("clinica", ""),
+        "TELEFONO_CLINICA": data.get("telefono_clinica", ""),
+        "EMAIL_CLINICA": data.get("correo_clinica", ""),
+        "NOMBRE_ADMISIONISTA": data.get("nombre_admisionista", ""),
+        "DNI_PACIENTE": data.get("dni_paciente", ""),
+        "NOMBRE_PACIENTE": data.get("nombre_paciente", ""),
+        "CELULAR_PACIENTE": data.get("celular_registro", ""),
+        "RUC": data.get("ruc_empresa", ""),
+        "RAZON_SOCIAL": data.get("razon_social", ""),
+        "FORMATO_SCTR_FIRMADO": data.get("formato_sctr_firmado", ""),
+        "FECHA_HORA_ACCIDENTE": data.get("fecha_hora_accidente", ""),
+        "HORARIO_TRABAJADOR": data.get("horario_trabajo", ""),
+        "HORAS_EXTRAS": data.get("hace_horas_extras", ""),
+        "CARGO_TRABAJADOR": data.get("cargo_paciente", ""),
+        "AREA_TRABAJADOR": data.get("area_trabajo", ""),
+        "IMPLEMENTOS_SEGURIDAD": data.get("implementos_seguridad", ""),
+        "DIRECCION_ACCIDENTE": data.get("direccion_accidente", ""),
+        "DESCRIPCION_ACCIDENTE": data.get("detalle_accidente", ""),
+        "CORREO_DESTINO": correo_destino,
+    }
+
+def _payload_sctr_continuidad(data, correo_destino):
+    return {
+        "NOMBRE_CLINICA": data.get("clinica", ""),
+        "TELEFONO_CLINICA": data.get("telefono_clinica", ""),
+        "EMAIL_CLINICA": data.get("correo_clinica", ""),
+        "NOMBRE_ADMISIONISTA": data.get("nombre_admisionista", ""),
+        "DOI_PACIENTE": data.get("dni_paciente", ""),
+        "NOMBRE_PACIENTE": data.get("nombre_paciente", ""),
+        "CELULAR_PACIENTE": data.get("celular_registro", ""),
+        "RUC": data.get("ruc_empresa", ""),
+        "RAZON_SOCIAL": data.get("razon_social", ""),
+        "FORMATO_SCTR_FIRMADO": data.get("formato_sctr_firmado", ""),
+        "FECHA_HORA_ACCIDENTE": data.get("fecha_hora_accidente", ""),
+        "FECHA_ULT_ATENCION": data.get("fecha_ultima_atencion", ""),
+        "ESPECIALIDAD": data.get("especialidad", ""),
+        "DIAGNOSTICO": data.get("diagnostico", ""),
+        "LATERALIDAD": data.get("lateralidad", ""),
+        "CORREO_DESTINO": correo_destino,
+    }
+
+# ─────────────────────────────────────────────
+# Credenciales DANAConnect (guardar en Secret Manager)
+# ─────────────────────────────────────────────
+
+DANACONNECT_AUTH = os.environ.get("DANACONNECT_AUTH")
+
+CONVERSATION_IDS = {
+    "EPS_NUEVO": 592884,
+    "SCTR_NUEVO": 592886,
+    "SCTR_CONTINUIDAD": 592888,
+}
+
+# API: DANAConnect - start/data
+def _enviar_correo_admision(tipo, payload):
+    """
+    Envía la notificación transaccional a DANAConnect luego de un insert exitoso.
+    No lanza excepción si falla (para no romper el flujo principal de admisión);
+    solo loguea el error.
+    """
+    conversation_id = CONVERSATION_IDS.get(tipo)
+    if not conversation_id:
+        logging.error(f"[DANAConnect] Tipo de admisión no reconocido: {tipo}")
+        return False
+
+    url = f"https://appserv.danaconnect.com/api/1.0/rest/conversation/{conversation_id}/start/data"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"{DANACONNECT_AUTH}",
+        "X-DEBUG": "0",
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        logging.info(f"[DANAConnect] Notificación '{tipo}' enviada OK: {resp.text}")
+        return True
+    except requests.exceptions.RequestException as e:
+        detalle = getattr(e.response, "text", str(e))
+        logging.error(f"[DANAConnect] Error enviando '{tipo}': {detalle}")
+        return False

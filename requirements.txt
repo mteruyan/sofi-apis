@@ -9,3 +9,4 @@ cloud-sql-python-connector==1.9.0
 pg8000==1.31.2
 SQLAlchemy==2.0.30
 openpyxl==3.1.5
+google-cloud-aiplatform

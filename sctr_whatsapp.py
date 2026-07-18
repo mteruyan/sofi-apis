@@ -438,3 +438,128 @@ def handle_sctr_borrar_empleado(request):
         "numero_eliminado": numero,
         "total_restante":   len(empleados) - 1
     }, ensure_ascii=False), 200, HEADERS)
+
+# ──────────────────────────────────────────────
+# Plantillas HTML (form + resultado)
+# ──────────────────────────────────────────────
+def _html_form_excel_sctr(error=None):
+    error_html = f'<p class="error">{error}</p>' if error else ""
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Descargar Excel SCTR</title>
+<style>
+  body {{ font-family: Arial, sans-serif; background:#F0F4F8; display:flex;
+          align-items:center; justify-content:center; min-height:100vh; margin:0; }}
+  .card {{ background:#FFFFFF; padding:32px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.1);
+           width:100%; max-width:380px; text-align:center; }}
+  h1 {{ font-size:18px; color:#1A1A2E; margin-bottom:4px; }}
+  p.sub {{ color:#555555; font-size:13px; margin-bottom:24px; }}
+  input[type=text] {{ width:100%; padding:12px; font-size:16px; border:1px solid #ccc;
+                       border-radius:6px; box-sizing:border-box; text-transform:uppercase; }}
+  button {{ width:100%; margin-top:16px; padding:12px; font-size:15px; font-weight:bold;
+            color:#FFFFFF; background:#0066CC; border:none; border-radius:6px; cursor:pointer; }}
+  button:hover {{ background:#00509E; }}
+  .error {{ color:#C0392B; font-size:13px; margin-top:12px; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>SCTR – Descargar Excel</h1>
+    <p class="sub">Ingresa el código de tu grupo SCTR</p>
+    <form method="POST" action="">
+      <input type="text" name="codigo" placeholder="Ej: SCTR1234" autocomplete="off" required>
+      <button type="submit">Buscar</button>
+    </form>
+    {error_html}
+  </div>
+</body>
+</html>"""
+
+
+def _html_resultado_excel_sctr(empresa, codigo, total, url_excel, filename):
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCTR – {empresa}</title>
+<style>
+  body {{ font-family: Arial, sans-serif; background:#F0F4F8; display:flex;
+          align-items:center; justify-content:center; min-height:100vh; margin:0; }}
+  .card {{ background:#FFFFFF; padding:32px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.1);
+           width:100%; max-width:380px; text-align:center; }}
+  h1 {{ font-size:18px; color:#1A1A2E; margin-bottom:16px; }}
+  .dato {{ text-align:left; font-size:14px; color:#333; margin:6px 0; }}
+  .dato b {{ color:#1A1A2E; }}
+  a.descargar {{ display:block; margin-top:24px; padding:12px; font-size:15px; font-weight:bold;
+                 color:#FFFFFF; background:#0066CC; border-radius:6px; text-decoration:none; }}
+  a.descargar:hover {{ background:#00509E; }}
+  a.volver {{ display:block; margin-top:12px; font-size:13px; color:#555555; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>SCTR – {empresa}</h1>
+    <p class="dato"><b>Código:</b> {codigo}</p>
+    <p class="dato"><b>Total empleados:</b> {total}</p>
+    <a class="descargar" href="{url_excel}" download="{filename}">Descargar Excel</a>
+    <a class="volver" href="">Buscar otro código</a>
+  </div>
+</body>
+</html>"""
+
+
+# ──────────────────────────────────────────────
+# HANDLER 4: Página web — descargar Excel ingresando el código
+# API: /sctr/excel-web
+# ──────────────────────────────────────────────
+def handle_sctr_excel_web(request):
+    HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
+
+    if request.method == "GET":
+        return (_html_form_excel_sctr(), 200, HTML_HEADERS)
+
+    # POST: viene del <form>
+    codigo = (request.form.get("codigo") or "").strip().upper()
+    if not codigo:
+        return (_html_form_excel_sctr(error="Ingresa un código."), 400, HTML_HEADERS)
+
+    conn = get_conn()
+    cur  = conn.cursor()
+
+    cur.execute("SELECT id, empresa, ruc FROM sctr_grupos WHERE codigo = %s", (codigo,))
+    grupo = cur.fetchone()
+
+    if not grupo:
+        cur.close(); conn.close()
+        return (_html_form_excel_sctr(error=f"No existe ningún grupo con el código {codigo}."), 200, HTML_HEADERS)
+
+    grupo_id, empresa, ruc = grupo
+
+    cur.execute("""
+        SELECT nombres, apellido_paterno, apellido_materno,
+               numero_documento, fecha_nacimiento, nacionalidad, sexo, sueldo
+        FROM sctr_empleados
+        WHERE grupo_id = %s
+        ORDER BY apellido_paterno, apellido_materno, nombres
+    """, (grupo_id,))
+    cols = ["nombres","apellido_paterno","apellido_materno",
+            "numero_documento","fecha_nacimiento","nacionalidad","sexo","sueldo"]
+    empleados = [dict(zip(cols, row)) for row in cur.fetchall()]
+    cur.close(); conn.close()
+
+    if not empleados:
+        return (_html_form_excel_sctr(error=f"El grupo {empresa} aún no tiene empleados registrados."), 200, HTML_HEADERS)
+
+    import pytz
+    LIMA_TZ  = pytz.timezone("America/Lima")
+    ahora    = datetime.now(LIMA_TZ).replace(tzinfo=None)
+    wb       = generar_excel(empleados, empresa, ruc or "")
+    fecha    = ahora.strftime("%Y%m%d")
+    filename = f"SCTR_{empresa.replace(' ', '_')}_{fecha}_{ahora.strftime('%H%M%S')}.xlsx"
+    file_url = subir_excel_gcs(wb, filename)
+
+    return (_html_resultado_excel_sctr(empresa, codigo, len(empleados), file_url, filename), 200, HTML_HEADERS)

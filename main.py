@@ -34,6 +34,206 @@ DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/51
 DANACONNECT_AUTH = os.environ["DANACONNECT_AUTH"]
 WHATSAPP_URL     = "wa.me/51955973936"
 
+CAMPANIA_CSS = """
+:root {
+  --sanitas-teal: #00A9B7;
+  --sanitas-teal-dark: #007A87;
+  --sanitas-navy: #003654;
+  --sanitas-bg: #F4F7F9;
+  --sanitas-white: #FFFFFF;
+  --sanitas-gray: #6B7A82;
+  --sanitas-border: #DCE4E8;
+  --sanitas-success: #2E9E5B;
+  --sanitas-danger: #D64545;
+  --sanitas-warning: #E8A33D;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--sanitas-bg);
+  color: var(--sanitas-navy);
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.contenedor {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* Header de marca */
+.topbar {
+  background: linear-gradient(135deg, var(--sanitas-navy), var(--sanitas-teal-dark));
+  color: white;
+  padding: 18px 16px;
+}
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.topbar .subtitulo {
+  font-size: 13px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+/* Navegación */
+nav.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0 20px;
+}
+nav.tabs a {
+  text-decoration: none;
+  color: var(--sanitas-navy);
+  background: var(--sanitas-white);
+  border: 1px solid var(--sanitas-border);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+nav.tabs a:hover, nav.tabs a.activo {
+  background: var(--sanitas-teal);
+  color: white;
+  border-color: var(--sanitas-teal);
+}
+
+/* Tarjetas / cajas */
+.card {
+  background: var(--sanitas-white);
+  border: 1px solid var(--sanitas-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 3px rgba(0,54,84,0.06);
+}
+.card h2, .card h3 { margin-top: 0; color: var(--sanitas-navy); }
+
+/* Formularios */
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sanitas-gray);
+  margin-bottom: 4px;
+  margin-top: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+input[type="text"], input[type="date"], input[type="file"],
+select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--sanitas-border);
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--sanitas-white);
+  color: var(--sanitas-navy);
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--sanitas-teal);
+  box-shadow: 0 0 0 3px rgba(0,169,183,0.15);
+}
+textarea { resize: vertical; min-height: 60px; }
+
+button, .btn {
+  background: var(--sanitas-teal);
+  color: white;
+  border: none;
+  padding: 12px 22px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 16px;
+  transition: background 0.15s ease;
+  min-height: 44px; /* área táctil cómoda en celular */
+}
+button:hover, .btn:hover { background: var(--sanitas-teal-dark); }
+button.danger { background: var(--sanitas-danger); }
+button.danger:hover { background: #b83a3a; }
+
+/* Filtros en fila (colapsan en columna en móvil) */
+.filtros {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.filtros > div { flex: 1; min-width: 140px; }
+.filtros label { margin-top: 0; }
+.filtros button { margin-top: 0; height: 44px; }
+
+/* Tablas responsive: contenedor con scroll horizontal en pantallas chicas */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--sanitas-border);
+  border-radius: var(--radius);
+  background: var(--sanitas-white);
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 600px; /* fuerza scroll en vez de aplastar columnas */
+  font-size: 13px;
+}
+th {
+  background: var(--sanitas-navy);
+  color: white;
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--sanitas-border);
+}
+tr:hover td { background: rgba(0,169,183,0.05); }
+
+/* Mensajes de estado */
+.msg-exito { color: var(--sanitas-success); font-weight: 600; }
+.msg-error { color: var(--sanitas-danger); font-weight: 600; }
+.msg-aviso { color: var(--sanitas-warning); font-weight: 600; }
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.badge-ok { background: rgba(46,158,91,0.12); color: var(--sanitas-success); }
+.badge-pendiente { background: rgba(232,163,61,0.12); color: var(--sanitas-warning); }
+.badge-neutro { background: rgba(107,122,130,0.12); color: var(--sanitas-gray); }
+
+/* Responsive: ajustes para celular */
+@media (max-width: 600px) {
+  .topbar h1 { font-size: 17px; }
+  .card { padding: 14px; border-radius: 8px; }
+  .filtros { flex-direction: column; }
+  .filtros > div { width: 100%; }
+  nav.tabs { gap: 6px; }
+  nav.tabs a { font-size: 12px; padding: 7px 11px; }
+  button { width: 100%; }
+  th, td { padding: 8px; font-size: 12px; }
+}
+"""
+
 # ─────────────────────────────────────────────
 # CONEXIÓN
 # ─────────────────────────────────────────────
@@ -201,6 +401,16 @@ def api(request):
         return handle_generar_sms_web(request)
     elif path == "/campania/generar-sms-csv" and request.method == "GET":
         return handle_generar_sms_csv(request)
+    elif path == "/campania/top-mensajes" and request.method == "GET":
+        return handle_top_mensajes_campania(request)
+    elif path == "/campania/reporte-envios" and request.method == "GET":
+        return handle_reporte_envios_campania(request)
+    elif path == "/campania/ver-contactos" and request.method == "GET":
+        return handle_ver_contactos_campania(request)
+    elif path == "/campania/imagenes" and request.method in ("GET", "POST"):
+        return handle_imagenes_campania(request)
+    elif path == "/campania/mensajes-por-dia" and request.method == "GET":
+        return handle_mensajes_por_dia_campania(request)
     elif path.startswith("/sctr/") and request.method == "GET" and len(path.split("/")) == 3:
         codigo = path.split("/")[2]
         return handle_sctr_form(request, codigo)
@@ -215,6 +425,9 @@ def api(request):
         return handle_admision_eps_nuevo(request)
     elif path == "/admision/form" and request.method == "GET":
         return handle_admision_form_web(request)
+    elif path.startswith("/c/confirm/"):
+        code = path.split("/c/confirm/")[1]
+        return handle_confirmar_click_campania(code, request)
     elif path.startswith("/c/"):
         code = path.split("/c/")[1]
         return handle_redirect_campania(code, request)
@@ -1297,7 +1510,7 @@ def handle_envia_sms_leads_sctr(request):
 
         conn = get_connection()
         cur  = conn.cursor()
-        cur.execute("SELECT id, nombre, celular FROM sofi_leads_sctr WHERE enviado='N'")
+        cur.execute("SELECT DISTINCT ON (celular) id, nombre, celular FROM sofi_leads_sctr WHERE enviado = 'N' ORDER BY celular, id")
         leads = cur.fetchall()
         cur.close()
         conn.close()
@@ -1364,7 +1577,7 @@ def handle_envia_sms_leads_medicamentos(request):
 
         conn = get_connection()
         cur  = conn.cursor()
-        cur.execute("SELECT id, nombre, celular FROM sofi_leads_medicamentos WHERE enviado='N'")
+        cur.execute("SELECT DISTINCT ON (celular) id, nombre, celular FROM sofi_leads_medicamentos WHERE enviado = 'N' ORDER BY celular, id")
         leads = cur.fetchall()
         cur.close()
         conn.close()
@@ -1469,7 +1682,7 @@ def handle_envia_sms_leads_consultas(request):
 
         conn = get_connection()
         cur  = conn.cursor()
-        cur.execute("SELECT id, nombre, celular FROM sofi_leads_consultas WHERE enviado='N'")
+        cur.execute("SELECT DISTINCT ON (celular) id, nombre, celular FROM sofi_leads_consultas WHERE enviado = 'N' ORDER BY celular, id")
         leads = cur.fetchall()
         cur.close()
         conn.close()
@@ -2346,7 +2559,7 @@ def envia_sms_leads_generico(tabla, mensaje_template, aviso_descripcion):
 
     conn = get_connection()
     cur  = conn.cursor()
-    cur.execute(f"SELECT id, nombre, celular FROM {tabla} WHERE enviado='N'")
+    cur.execute(f"SELECT DISTINCT ON (celular) id, nombre, celular FROM {tabla} WHERE enviado='N'")
     leads = cur.fetchall()
     cur.close()
     conn.close()
@@ -3747,6 +3960,48 @@ def registrar_wsp_sctr_vencidos(cur, conn, resultados):
 
     conn.commit()
 
+
+# ─────────────────────────────────────────────────────────────────
+# RETENCION - Header + navegación reutilizable
+# ─────────────────────────────────────────────────────────────────
+def _layout_campania(pw, titulo, subtitulo, contenido_html, activo=""):
+    def link(href, texto, key):
+        clase = "activo" if key == activo else ""
+        return f'<a href="{href}?pw={pw}" class="{clase}">{texto}</a>'
+
+    nav_html = f"""
+    <nav class="tabs">
+      {link("/campania/mantenimiento", "🏠 Mantenimiento", "mantenimiento")}
+      {link("/campania/cargar-excel-web", "📤 Cargar Excel", "cargar")}
+      {link("/campania/ver-contactos", "🔍 Contactos", "contactos")}
+      {link("/campania/generar-sms-web", "✉️ Enviar SMS", "enviar")}
+      {link("/campania/imagenes", "🖼️ Imágenes", "imagenes")}
+      {link("/campania/reporte-clicks", "📊 Clicks", "retencion")}
+      {link("/campania/reporte-envios", "📅 Envíos", "envios")}
+      {link("/campania/mensajes-por-dia", "📆 Por día", "por-dia")}
+      {link("/campania/top-mensajes", "🏆 Top mensajes", "top")}
+    </nav>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{titulo} - Sanitas</title>
+  <style>{CAMPANIA_CSS}</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>{titulo}</h1>
+    <div class="subtitulo">{subtitulo}</div>
+  </div>
+  <div class="contenedor">
+    {nav_html}
+    {contenido_html}
+  </div>
+</body>
+</html>"""   
+
 # ─────────────────────────────────────────────────────────────────
 # RETENCION - Definicion para el control de errores
 # ─────────────────────────────────────────────────────────────────
@@ -3779,26 +4034,22 @@ def handle_cargar_excel_campania(request):
 
     filas = []
     headers = None
+
     for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i == 0:
-            headers = [str(h).strip().lower() for h in row]
-            continue
-        data = dict(zip(headers, row))
-        telefono1 = str(data.get("telefono1") or "").strip()
-        tipo_cliente = str(data.get("tipo_cliente") or "").strip().upper()
-        if not telefono1 or not tipo_cliente:
-            continue
-        fecha_carga = data.get("fecha_carga")
-        if isinstance(fecha_carga, datetime):
-            fecha_carga = fecha_carga.date()
-        filas.append((
-            str(data.get("nombre") or "").strip(),
-            telefono1,
-            str(data.get("telefono2") or "").strip() or None,
-            str(data.get("telefono3") or "").strip() or None,
-            tipo_cliente,
-            fecha_carga
-        ))
+            if i == 0:
+                headers = [str(h).strip().lower() for h in row]
+                continue
+            data = dict(zip(headers, row))
+            telefono1 = str(data.get("telefono1") or "").strip()
+            tipo_cliente = str(data.get("tipo_cliente") or "").strip().upper()
+            if not telefono1 or not tipo_cliente:
+                continue
+            filas.append((
+                str(data.get("nombre") or "").strip(),
+                telefono1,
+                tipo_cliente
+            ))
+            
     wb.close()
 
     if not filas:
@@ -3809,13 +4060,10 @@ def handle_cargar_excel_campania(request):
         with conn.cursor() as cur:
             execute_values(cur, """
                 INSERT INTO campania_contactos
-                    (nombre, telefono1, telefono2, telefono3, tipo_cliente, fecha_carga)
+                    (nombre, telefono1, tipo_cliente)
                 VALUES %s
                 ON CONFLICT (telefono1, tipo_cliente) DO UPDATE SET
                     nombre = EXCLUDED.nombre,
-                    telefono2 = EXCLUDED.telefono2,
-                    telefono3 = EXCLUDED.telefono3,
-                    fecha_carga = EXCLUDED.fecha_carga,
                     actualizado_at = NOW()
             """, filas)
         conn.commit()
@@ -3920,81 +4168,92 @@ def handle_generar_sms_web(request):
     opciones_html = "".join(f'<option value="{t}">{t}</option>' for t in tipos)
     resultado_html = ""
     campana_val = ""
+    max_intentos_val = 3
 
     if request.method == "POST":
         tipo_val = (request.form.get("tipo_cliente") or "").strip().upper()
         campana_val = (request.form.get("campana") or "").strip()
+        excluir_convertidos = request.form.get("excluir_convertidos") == "on"
+        try:
+            max_intentos_val = int(request.form.get("max_intentos") or 3)
+        except ValueError:
+            max_intentos_val = 3
 
         if not tipo_val or not campana_val:
-            resultado_html = '<p style="color:red;">Selecciona tipo_cliente y escribe un nombre de campaña.</p>'
+            resultado_html = '<p class="msg-error">Selecciona tipo_cliente y escribe un nombre de campaña.</p>'
         else:
             try:
-                resultados = _generar_y_enviar_campania(tipo_val, campana_val)
+                resultados, omitidos = _generar_y_enviar_campania(
+                    tipo_val, campana_val, excluir_convertidos, max_intentos_val
+                )
             except ValueError as e:
                 resultados = None
-                resultado_html = f'<p style="color:red;">{e}</p>'
+                omitidos = 0
+                resultado_html = f'<p class="msg-error">{e}</p>'
 
             if resultados is not None:
+                aviso_omitidos = f'<p class="msg-aviso">⏭️ {omitidos} contactos omitidos por haber alcanzado el tope de {max_intentos_val} intentos.</p>' if omitidos else ""
                 if not resultados:
-                    resultado_html = '<p style="color:orange;">No hay contactos cargados para ese tipo_cliente.</p>'
+                    resultado_html = f'<p class="msg-aviso">No hay contactos pendientes de envío para ese tipo_cliente.</p>{aviso_omitidos}'
                 else:
                     exitosos = sum(1 for _, _, ok, _ in resultados if ok)
                     fallidos = len(resultados) - exitosos
-                    filas_tabla = "".join(
-                        f"""<tr>
-                            <td>{cel}</td><td>{nom or ''}</td>
-                            <td style="color:{'green' if ok else 'red'};">{'✅ Enviado' if ok else '❌ Error'}</td>
-                            <td>{err or ''}</td>
-                        </tr>"""
-                        for cel, nom, ok, err in resultados
-                    )
+
+                    solo_errores = [r for r in resultados if not r[2]]
+                    if solo_errores:
+                        filas_tabla = "".join(
+                            f"""<tr>
+                                <td>{cel}</td><td>{nom or ''}</td>
+                                <td><span class="badge badge-pendiente" style="background:rgba(214,69,69,0.12);color:var(--sanitas-danger);">❌ Error</span></td>
+                                <td>{err or ''}</td>
+                            </tr>"""
+                            for cel, nom, ok, err in solo_errores
+                        )
+                        tabla_html = f"""
+                        <p style="margin-top:16px;font-weight:600;">Detalle de {len(solo_errores)} errores:</p>
+                        <div class="table-wrap">
+                          <table>
+                          <tr><th>Celular</th><th>Nombre</th><th>Estado</th><th>Detalle error</th></tr>
+                          {filas_tabla}
+                          </table>
+                        </div>"""
+                    else:
+                        tabla_html = ""
+
                     resultado_html = f"""
-                    <p style="color:green;">✅ {exitosos} enviados correctamente{f', ❌ {fallidos} con error' if fallidos else ''} — tipo <b>{tipo_val}</b> / campaña <b>{campana_val}</b>.</p>
-                    <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%;font-size:13px;">
-                    <tr><th>Celular</th><th>Nombre</th><th>Estado</th><th>Detalle error</th></tr>
-                    {filas_tabla}
-                    </table>
-                    <p>Los clics de estos links ya se pueden ver en el <a href="/campania/reporte-clicks?pw={pw}">reporte de clics</a>.</p>
+                    <p class="msg-exito">✅ {exitosos} enviados correctamente{f', ❌ {fallidos} con error' if fallidos else ''} — tipo <b>{tipo_val}</b> / campaña <b>{campana_val}</b>.</p>
+                    {aviso_omitidos}
+                    {tabla_html}
+                    <p style="margin-top:14px;"><a href="/campania/reporte-clicks?pw={pw}">Ver reporte de retención →</a> |
+                       <a href="/campania/mensajes-por-dia?pw={pw}">Ver mensajes por día →</a></p>
                     """
 
-    html = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Generar y enviar SMS - Sanitas</title>
-  <style>
-    body {{ font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }}
-    .box {{ border: 1px solid #ccc; border-radius: 8px; padding: 25px; margin-bottom: 20px; }}
-    select, input[type="text"] {{ padding: 6px; margin: 8px 0; width: 100%; box-sizing: border-box; }}
-    button {{ background: #0057A3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }}
-    button:hover {{ background: #003d73; }}
-    table {{ margin-top: 15px; }}
-  </style>
-</head>
-<body>
-  <h2>Generar links y enviar SMS</h2>
-  <div class="box">
-    <form method="POST" action="/campania/generar-sms-web?pw={pw}"
-          onsubmit="return confirm('Esto enviará SMS reales por Danaconnect a todos los contactos de este tipo_cliente. ¿Continuar?');">
-      <label>Tipo de cliente:</label>
-      <select name="tipo_cliente" required>
-        <option value="">-- selecciona --</option>
-        {opciones_html}
-      </select>
-      <label>Nombre de campaña (identifica este envío):</label>
-      <input type="text" name="campana" placeholder="ej. retencion_jul2026" value="{campana_val}" required>
-      <button type="submit">Generar y enviar SMS</button>
-    </form>
-    {resultado_html}
-  </div>
-  <p>
-    <a href="/campania/mantenimiento?pw={pw}">← Volver a mantenimiento</a> |
-    <a href="/campania/cargar-excel-web?pw={pw}">Cargar Excel</a> |
-    <a href="/campania/reporte-clicks?pw={pw}">Ver reporte de clics</a>
-  </p>
-</body>
-</html>"""
-    return html, 200
+    contenido = f"""
+    <div class="card">
+      <form method="POST" action="/campania/generar-sms-web?pw={pw}"
+            onsubmit="return confirm('Esto enviará SMS reales por Danaconnect a todos los contactos de este tipo_cliente. ¿Continuar?');">
+        <label>Tipo de cliente</label>
+        <select name="tipo_cliente" required>
+          <option value="">-- selecciona --</option>
+          {opciones_html}
+        </select>
+        <label>Nombre de campaña (identifica este envío)</label>
+        <input type="text" name="campana" placeholder="ej. retencion_jul2026" value="{campana_val}" required>
+        <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-weight:normal;margin-top:14px;">
+          <input type="checkbox" name="excluir_convertidos" checked style="width:auto;">
+          No reenviar a quienes ya hicieron clic (recomendado)
+        </label>
+        <label>Máximo de intentos por cliente</label>
+        <input type="text" name="max_intentos" value="{max_intentos_val}" style="max-width:100px;">
+        <button type="submit">Generar y enviar SMS</button>
+      </form>
+    </div>
+    <div class="card">
+      {resultado_html if resultado_html else '<p style="color:var(--sanitas-gray);margin:0;">Los resultados del envío aparecerán aquí.</p>'}
+    </div>
+    """
+
+    return _layout_campania(pw, "Generar y enviar SMS", "Envío manual vía Danaconnect", contenido, activo="enviar")
 
 @con_log_errores
 def handle_generar_sms_csv(request):
@@ -4046,7 +4305,9 @@ IMG_VERSION = str(int(time.time()))
 @con_log_errores
 def handle_redirect_campania(code, request):
     base_url = os.environ.get("BASE_URL", "https://sntspe.com")
-
+    IMAGEN_OG = os.environ.get("IMAGEN_OG")
+    
+    
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -4058,11 +4319,13 @@ def handle_redirect_campania(code, request):
 
             cur.execute("""
                 UPDATE campania_links SET
-                    clicked_at = COALESCE(clicked_at, NOW()),
-                    click_count = click_count + 1,
-                    ip_address = %s
+                    raw_hits = raw_hits + 1,
+                    ip_address = %s,
+                    user_agent = %s,
+                    entregado = TRUE,
+                    entregado_at = COALESCE(entregado_at, NOW())
                 WHERE code = %s
-            """, (request.remote_addr, code))
+            """, (request.remote_addr, request.headers.get("User-Agent", ""), code))
             conn.commit()
 
             cur.execute("""
@@ -4074,6 +4337,12 @@ def handle_redirect_campania(code, request):
         conn.close()
 
     og_title, og_description, og_image = og if og else ("Sanitas Perú", "Contáctanos por WhatsApp", "sanitas-general.jpg")
+    
+    if og_image and og_image.startswith("http"):
+        img_url = og_image
+    else:
+        img_url = f"{IMAGEN_OG}{og_image}?v={IMG_VERSION}"
+
     url_canonica = f"{base_url}/c/{code}"
     url_destino = f"https://wa.me/{whatsapp_destino}"
 
@@ -4081,23 +4350,29 @@ def handle_redirect_campania(code, request):
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="0;url={url_destino}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{url_canonica}">
   <meta property="og:site_name" content="Sanitas Perú">
   <meta property="og:title" content="{og_title}">
   <meta property="og:description" content="{og_description}">
-  <meta property="og:image" content="{base_url}/static/{og_image}?v={IMG_VERSION}">
+  <meta property="og:image" content="{IMAGEN_OG}{og_image}?v={IMG_VERSION}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{og_title}">
   <meta name="twitter:description" content="{og_description}">
-  <meta name="twitter:image" content="{base_url}/static/{og_image}?v={IMG_VERSION}">
+  <meta name="twitter:image" content="{IMAGEN_OG}{og_image}?v={IMG_VERSION}">
   <title>{og_title}</title>
 </head>
 <body>
-  <script>window.location.href = "{url_destino}";</script>
+  <script>
+    if (navigator.sendBeacon) {{
+      navigator.sendBeacon("/c/confirm/{code}");
+    }} else {{
+      fetch("/c/confirm/{code}", {{ method: "POST", keepalive: true }});
+    }}
+    window.location.href = "{url_destino}";
+  </script>
   <p>Redirigiendo... <a href="{url_destino}">Haz clic aquí si no eres redirigido.</a></p>
 </body>
 </html>"""
@@ -4129,6 +4404,20 @@ def handle_mantenimiento_campania(request):
                     request.form.get("whatsapp_destino"),
                     tipo_cliente
                 ))
+                for n in range(2, 6):
+                    texto = (request.form.get(f"mensaje_intento_{n}") or "").strip()
+                    if texto:
+                        cur.execute("""
+                            INSERT INTO campania_plantillas_intentos (tipo_cliente, intento, mensaje, actualizado_at)
+                            VALUES (%s, %s, %s, NOW())
+                            ON CONFLICT (tipo_cliente, intento) DO UPDATE SET
+                                mensaje = EXCLUDED.mensaje, actualizado_at = NOW()
+                        """, (tipo_cliente, n, texto))
+                    else:
+                        cur.execute("""
+                            DELETE FROM campania_plantillas_intentos
+                            WHERE tipo_cliente = %s AND intento = %s
+                        """, (tipo_cliente, n))
             conn.commit()
 
         with conn.cursor() as cur:
@@ -4137,41 +4426,53 @@ def handle_mantenimiento_campania(request):
                 FROM campania_plantillas ORDER BY tipo_cliente
             """)
             plantillas = cur.fetchall()
+
+        tarjetas_html = ""
+        for tc, mensaje, og_title, og_desc, og_img, wa in plantillas:
+            with conn.cursor() as cur_v:
+                cur_v.execute("""
+                    SELECT intento, mensaje FROM campania_plantillas_intentos
+                    WHERE tipo_cliente = %s ORDER BY intento
+                """, (tc,))
+                variantes_dict = dict(cur_v.fetchall())
+
+            variantes_html = ""
+            for n in range(2, 6):
+                texto_variante = variantes_dict.get(n, "")
+                variantes_html += f"""
+                <label>Mensaje intento #{n} (vacío = usa el mensaje base)</label>
+                <textarea name="mensaje_intento_{n}" rows="2">{texto_variante}</textarea>"""
+
+            tarjetas_html += f"""
+            <div class="card">
+              <form method="POST" action="/campania/mantenimiento?pw={pw}">
+                <input type="hidden" name="tipo_cliente" value="{tc}">
+                <h3>{tc}</h3>
+                <label>Mensaje base (intento #1)</label>
+                <textarea name="mensaje" rows="3">{mensaje}</textarea>
+                {variantes_html}
+                <label>OG Title</label>
+                <input type="text" name="og_title" value="{og_title}">
+                <label>OG Description</label>
+                <input type="text" name="og_description" value="{og_desc}">
+                <label>OG Image (URL del bucket)</label>
+                <input type="text" name="og_image" value="{og_img}">
+                <label>WhatsApp destino</label>
+                <input type="text" name="whatsapp_destino" value="{wa}">
+                <button type="submit">Guardar {tc}</button>
+              </form>
+            </div>"""
     finally:
         conn.close()
 
-    filas_html = ""
-    for tc, mensaje, og_title, og_desc, og_img, wa in plantillas:
-        filas_html += f"""
-        <form method="POST" action="/campania/mantenimiento?pw={pw}" style="border:1px solid #ccc;padding:15px;margin-bottom:15px;">
-            <input type="hidden" name="tipo_cliente" value="{tc}">
-            <h3>{tc}</h3>
-            <label>Mensaje (usa {{Nombre}} y {{LINK}}):</label><br>
-            <textarea name="mensaje" rows="3" style="width:100%;">{mensaje}</textarea><br>
-            <label>OG Title:</label><br>
-            <input type="text" name="og_title" value="{og_title}" style="width:100%;"><br>
-            <label>OG Description:</label><br>
-            <input type="text" name="og_description" value="{og_desc}" style="width:100%;"><br>
-            <label>OG Image (archivo en /static):</label><br>
-            <input type="text" name="og_image" value="{og_img}" style="width:100%;"><br>
-            <label>WhatsApp destino:</label><br>
-            <input type="text" name="whatsapp_destino" value="{wa}" style="width:100%;"><br><br>
-            <button type="submit">Guardar</button>
-        </form>"""
+    contenido = f"""
+    <div class="card">
+      <p style="color:var(--sanitas-gray);margin:0;">Edita el mensaje base y las variantes por intento de cada tipo de cliente.</p>
+    </div>
+    {tarjetas_html}
+    """
 
-    html = f"""<!DOCTYPE html>
-        <html><head><meta charset="UTF-8"><title>Mantenimiento Campaña</title></head>
-        <body style="font-family:sans-serif;max-width:700px;margin:30px auto;">
-        <h2>Plantillas de campaña</h2>
-        <p>
-        <a href="/campania/generar-sms-web?pw={pw}">✉️ Generar SMS</a> |
-        <a href="/campania/cargar-excel-web?pw={pw}">📤 Cargar Excel de contactos</a> |
-        <a href="/campania/reporte-clicks?pw={pw}">📊 Ver reporte de clics</a>
-        </p>
-        {filas_html}
-        </body></html>"""
-    return html, 200
-
+    return _layout_campania(pw, "Plantillas de campaña", "Panel de mantenimiento RETENCIONES", contenido, activo="mantenimiento")
 
 @con_log_errores
 def handle_reporte_clicks_campania(request):
@@ -4183,45 +4484,66 @@ def handle_reporte_clicks_campania(request):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT c.telefono1, c.nombre, c.tipo_cliente,
-                       l.click_count, l.clicked_at, l.campana
+                SELECT
+                    c.telefono1, c.nombre, c.tipo_cliente,
+                    c.convertido, c.fecha_conversion,
+                    COUNT(l.id) AS total_intentos,
+                    MIN(l.creado_at) AS primer_envio,
+                    MAX(l.creado_at) AS ultimo_envio,
+                    BOOL_OR(l.entregado) AS entregado,
+                    MIN(l.entregado_at) AS primera_entrega
                 FROM campania_contactos c
                 LEFT JOIN campania_links l
                     ON l.celular = c.telefono1 AND l.tipo_cliente = c.tipo_cliente
-                ORDER BY l.clicked_at DESC NULLS LAST
+                GROUP BY c.telefono1, c.nombre, c.tipo_cliente, c.convertido, c.fecha_conversion
+                ORDER BY c.convertido ASC, entregado ASC, total_intentos DESC
             """)
             rows = cur.fetchall()
     finally:
         conn.close()
 
     filas_html = ""
-    total_clicks = 0
-    for telefono, nombre, tipo_cliente, click_count, clicked_at, campana in rows:
-        clicked = click_count and click_count > 0
-        if clicked:
-            total_clicks += 1
+    total_convertidos = 0
+    total_entregados = 0
+    for telefono, nombre, tipo_cliente, convertido, fecha_conv, intentos, primer_envio, ultimo_envio, entregado, primera_entrega in rows:
+        if convertido:
+            total_convertidos += 1
+        if entregado:
+            total_entregados += 1
+
+        if convertido:
+            badge = '<span class="badge badge-ok">✅ Convertido</span>'
+        elif entregado:
+            badge = '<span class="badge" style="background:rgba(0,169,183,0.12);color:var(--sanitas-teal-dark);">📩 Entregado</span>'
+        elif intentos:
+            badge = '<span class="badge badge-pendiente">⏳ Sin confirmar</span>'
+        else:
+            badge = '<span class="badge badge-neutro">— Sin enviar</span>'
+
         filas_html += f"""<tr>
             <td>{telefono}</td><td>{nombre or ''}</td><td>{tipo_cliente}</td>
-            <td>{campana or ''}</td>
-            <td>{'Sí' if clicked else 'No'}</td>
-            <td>{click_count or 0}</td>
-            <td>{clicked_at or ''}</td>
+            <td>{intentos or 0}</td>
+            <td>{primer_envio.strftime('%Y-%m-%d %H:%M') if primer_envio else ''}</td>
+            <td>{ultimo_envio.strftime('%Y-%m-%d %H:%M') if ultimo_envio else ''}</td>
+            <td>{primera_entrega.strftime('%Y-%m-%d %H:%M') if primera_entrega else ''}</td>
+            <td>{badge}</td>
+            <td>{fecha_conv.strftime('%Y-%m-%d %H:%M') if fecha_conv else ''}</td>
         </tr>"""
 
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Reporte de clics</title></head>
-<body style="font-family:sans-serif;max-width:900px;margin:30px auto;">
-<h2>Reporte de clics ({total_clicks} de {len(rows)} contactaron)</h2>
-<p>
-<a href="/campania/mantenimiento?pw={pw}">← Volver a mantenimiento</a> |
-    <a href="/campania/cargar-excel-web?pw={pw}">Cargar Excel</a>
-</p>
-<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%;">
-<tr><th>Teléfono</th><th>Nombre</th><th>Tipo</th><th>Campaña</th><th>Clic</th><th># Clics</th><th>Fecha</th></tr>
-{filas_html}
-</table>
-</body></html>"""
-    return html, 200
+    contenido = f"""
+    <div class="card" style="display:flex;gap:30px;flex-wrap:wrap;">
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">✅ Convertidos</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-success);">{total_convertidos} / {len(rows)}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">📩 Entregados sin abrir</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-teal-dark);">{total_entregados - total_convertidos}</div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+      <tr><th>Teléfono</th><th>Nombre</th><th>Tipo</th><th>Intentos</th><th>1er envío</th><th>Último envío</th><th>1ra entrega</th><th>Estado</th><th>Fecha conversión</th></tr>
+      {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, "Reporte de retención", "Estado de conversión por contacto", contenido, activo="retencion")
 
 def handle_static_campania(filename):
     return send_from_directory("static", filename)
@@ -4248,7 +4570,7 @@ def handle_cargar_excel_web(request):
 
     if request.method == "POST":
         if "archivo" not in request.files or request.files["archivo"].filename == "":
-            mensaje = '<p style="color:red;">Selecciona un archivo Excel.</p>'
+            mensaje = '<p class="msg-error">Selecciona un archivo Excel.</p>'
         else:
             archivo = request.files["archivo"]
             try:
@@ -4266,81 +4588,57 @@ def handle_cargar_excel_web(request):
                     tipo_cliente = str(data.get("tipo_cliente") or "").strip().upper()
                     if not telefono1 or not tipo_cliente:
                         continue
-                    fecha_carga = data.get("fecha_carga")
-                    if isinstance(fecha_carga, datetime):
-                        fecha_carga = fecha_carga.date()
                     filas.append((
                         str(data.get("nombre") or "").strip(),
                         telefono1,
-                        str(data.get("telefono2") or "").strip() or None,
-                        str(data.get("telefono3") or "").strip() or None,
-                        tipo_cliente,
-                        fecha_carga
+                        tipo_cliente
                     ))
                 wb.close()
 
                 if not filas:
-                    mensaje = '<p style="color:red;">No se encontraron filas válidas (revisa columnas: nombre, telefono1, telefono2, telefono3, tipo_cliente, fecha_carga).</p>'
+                    mensaje = '<p class="msg-error">No se encontraron filas válidas (revisa columnas: nombre, telefono1, tipo_cliente).</p>'
                 else:
                     conn = get_connection()
                     try:
                         with conn.cursor() as cur:
                             execute_values(cur, """
                                 INSERT INTO campania_contactos
-                                    (nombre, telefono1, telefono2, telefono3, tipo_cliente, fecha_carga)
+                                    (nombre, telefono1, tipo_cliente)
                                 VALUES %s
                                 ON CONFLICT (telefono1, tipo_cliente) DO UPDATE SET
                                     nombre = EXCLUDED.nombre,
-                                    telefono2 = EXCLUDED.telefono2,
-                                    telefono3 = EXCLUDED.telefono3,
-                                    fecha_carga = EXCLUDED.fecha_carga,
                                     actualizado_at = NOW()
                             """, filas)
                         conn.commit()
                     finally:
                         conn.close()
 
-                    mensaje = f'<p style="color:green;">✅ {len(filas)} contactos insertados/actualizados correctamente.</p>'
+                    mensaje = f'<p class="msg-exito">✅ {len(filas)} contactos insertados/actualizados correctamente.</p>'
 
                     with get_connection() as conn2:
                         with conn2.cursor() as cur2:
                             cur2.execute("SELECT tipo_cliente, COUNT(*) FROM campania_contactos GROUP BY tipo_cliente ORDER BY tipo_cliente")
                             resumen_rows = cur2.fetchall()
-                    resumen = "<ul>" + "".join(f"<li>{tc}: {cnt} contactos</li>" for tc, cnt in resumen_rows) + "</ul>"
+                    filas_resumen = "".join(f"<li><b>{tc}</b>: {cnt} contactos</li>" for tc, cnt in resumen_rows)
+                    resumen = f"<ul style='margin-top:10px;'>{filas_resumen}</ul>"
 
             except Exception as e:
-                mensaje = f'<p style="color:red;">Error al procesar el archivo: {e}</p>'
+                mensaje = f'<p class="msg-error">Error al procesar el archivo: {e}</p>'
 
-    html = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Cargar campaña - Sanitas</title>
-  <style>
-    body {{ font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }}
-    .box {{ border: 1px solid #ccc; border-radius: 8px; padding: 25px; }}
-    input[type="file"] {{ margin: 15px 0; }}
-    button {{ background: #0057A3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }}
-    button:hover {{ background: #003d73; }}
-  </style>
-</head>
-<body>
-  <h2>Cargar Excel de campaña</h2>
-  <div class="box">
-    <p>Columnas esperadas: <b>nombre, telefono1, telefono2, telefono3, tipo_cliente, fecha_carga</b></p>
-    <form method="POST" action="/campania/cargar-excel-web?pw={pw}" enctype="multipart/form-data">
-      <input type="file" name="archivo" accept=".xlsx,.xls" required>
-      <br>
-      <button type="submit">Cargar archivo</button>
-    </form>
-    {mensaje}
-    {resumen}
-  </div>
-  <p><a href="/campania/mantenimiento?pw={pw}">← Volver a mantenimiento</a> |
-     <a href="/campania/reporte-clicks?pw={pw}">Ver reporte de clics</a></p>
-</body>
-</html>"""
-    return html, 200
+    contenido = f"""
+    <div class="card">
+      <p style="color:var(--sanitas-gray);margin-top:0;">Columnas esperadas en el Excel: <b>nombre, telefono1, tipo_cliente</b></p>
+      <form method="POST" action="/campania/cargar-excel-web?pw={pw}" enctype="multipart/form-data">
+        <label>Archivo Excel (.xlsx)</label>
+        <input type="file" name="archivo" accept=".xlsx,.xls" required>
+        <button type="submit">Cargar archivo</button>
+      </form>
+      {mensaje}
+      {resumen}
+    </div>
+    """
+
+    return _layout_campania(pw, "Cargar Excel", "Sube tu base de contactos de campaña", contenido, activo="cargar")
 
 def _limpiar_nombre_sms(nombre):
     return re.sub(
@@ -4378,7 +4676,10 @@ def _enviar_sms_campania_uno(numero, nombre, mensaje_tpl, link_corto, code):
 
     return True, None
 
-def _generar_y_enviar_campania(tipo_cliente, campana):
+from concurrent.futures import ThreadPoolExecutor, as_completed
+MAX_HILOS_ENVIO_SMS = 15  # cuántos SMS se mandan en paralelo; ajusta según límite de Danaconnect
+
+def _generar_y_enviar_campania(tipo_cliente, campana, excluir_convertidos=True, max_intentos=3):
     base_url = os.environ.get("BASE_URL", "https://sntspe.com")
 
     conn = get_connection()
@@ -4391,43 +4692,586 @@ def _generar_y_enviar_campania(tipo_cliente, campana):
             plantilla = cur.fetchone()
             if not plantilla:
                 raise ValueError(f"no existe plantilla para {tipo_cliente}")
-            mensaje_tpl, whatsapp_destino = plantilla
+            mensaje_base, whatsapp_destino = plantilla
 
             cur.execute("""
-                SELECT nombre, telefono1 FROM campania_contactos
+                SELECT intento, mensaje FROM campania_plantillas_intentos
                 WHERE tipo_cliente = %s
             """, (tipo_cliente,))
+            variantes = {intento: mensaje for intento, mensaje in cur.fetchall()}
+
+            query_contactos = """
+                SELECT nombre, telefono1 FROM campania_contactos
+                WHERE tipo_cliente = %s
+            """
+            params = [tipo_cliente]
+            if excluir_convertidos:
+                query_contactos += " AND COALESCE(convertido, FALSE) = FALSE"
+            cur.execute(query_contactos, params)
             contactos = cur.fetchall()
 
             registros_insert = []
             codes_por_contacto = []
+            omitidos_por_tope = 0
+
             for nombre, telefono1 in contactos:
+                cur.execute("""
+                    SELECT COUNT(*) FROM campania_links
+                    WHERE celular = %s AND tipo_cliente = %s
+                """, (telefono1, tipo_cliente))
+                intentos_previos = cur.fetchone()[0]
+
+                if intentos_previos >= max_intentos:
+                    omitidos_por_tope += 1
+                    continue
+
+                intento = intentos_previos + 1
+                mensaje_para_este_envio = variantes.get(intento, mensaje_base)
+
                 code = _generar_code_campania(telefono1)
-                registros_insert.append((code, telefono1, nombre, tipo_cliente, campana, whatsapp_destino))
-                codes_por_contacto.append((telefono1, nombre, code))
+                registros_insert.append((code, telefono1, nombre, tipo_cliente, campana, whatsapp_destino, intento, mensaje_para_este_envio))
+                codes_por_contacto.append((telefono1, nombre, code, mensaje_para_este_envio))
 
             if registros_insert:
                 execute_values(cur, """
                     INSERT INTO campania_links
-                        (code, celular, nombre, tipo_cliente, campana, whatsapp_destino)
+                        (code, celular, nombre, tipo_cliente, campana, whatsapp_destino, intento, mensaje_enviado)
                     VALUES %s
                 """, registros_insert)
             conn.commit()
     finally:
         conn.close()
 
+    # NUEVO: envío en paralelo con hilos, en vez de uno por uno
     resultados = []
-    for telefono1, nombre, code in codes_por_contacto:
-        link_corto = f"{base_url}/c/{code}"
-        ok, error = _enviar_sms_campania_uno(telefono1, nombre, mensaje_tpl, link_corto, code)
-        if not ok:
-            conn2 = get_connection()
-            try:
-                with conn2.cursor() as cur2:
-                    cur2.execute("UPDATE campania_links SET error_envio = %s WHERE code = %s", (error, code))
-                conn2.commit()
-            finally:
-                conn2.close()
-        resultados.append((telefono1, nombre, ok, error))
+    with ThreadPoolExecutor(max_workers=MAX_HILOS_ENVIO_SMS) as executor:
+        futuros = {
+            executor.submit(_enviar_sms_campania_uno, telefono1, nombre, mensaje_tpl, f"{base_url}/c/{code}", code): (telefono1, nombre, code)
+            for telefono1, nombre, code, mensaje_tpl in codes_por_contacto
+        }
 
-    return resultados
+        for futuro in as_completed(futuros):
+            telefono1, nombre, code = futuros[futuro]
+            try:
+                ok, error = futuro.result()
+            except Exception as e:
+                ok, error = False, str(e)
+
+            if ok:
+                aviso_descripcion = "retencion"
+                sms_aviso(telefono1, aviso_descripcion)
+
+            else:
+                conn2 = get_connection()
+                try:
+                    with conn2.cursor() as cur2:
+                        cur2.execute(
+                            "UPDATE campania_links SET error_envio = %s WHERE code = %s",
+                            (error, code)
+                        )
+                    conn2.commit()
+                finally:
+                    conn2.close()
+
+            resultados.append((telefono1, nombre, ok, error))
+
+    return resultados, omitidos_por_tope
+
+@con_log_errores
+def handle_top_mensajes_campania(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    try:
+        minimo_envios = int(request.args.get("min", 1))
+    except ValueError:
+        minimo_envios = 1
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT tipo_cliente, intento, mensaje_enviado,
+                       COUNT(*) AS enviados,
+                       SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS abiertos
+                FROM campania_links
+                WHERE mensaje_enviado IS NOT NULL
+                GROUP BY tipo_cliente, intento, mensaje_enviado
+                HAVING COUNT(*) >= %s
+                ORDER BY (SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END)::float / COUNT(*)) DESC
+                LIMIT 10
+            """, (minimo_envios,))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    filas_html = ""
+    for tipo_cliente, intento, mensaje, enviados, abiertos in rows:
+        tasa = round(100.0 * abiertos / enviados, 1) if enviados else 0
+        color_tasa = "var(--sanitas-success)" if tasa >= 30 else ("var(--sanitas-warning)" if tasa >= 10 else "var(--sanitas-gray)")
+        filas_html += f"""<tr>
+            <td>{tipo_cliente}</td><td>#{intento}</td>
+            <td style="max-width:380px;">{mensaje}</td>
+            <td>{enviados}</td><td>{abiertos}</td>
+            <td style="color:{color_tasa};font-weight:700;">{tasa}%</td>
+        </tr>"""
+
+    if not rows:
+        filas_html = '<tr><td colspan="6" style="text-align:center;color:var(--sanitas-gray);padding:20px;">Sin datos suficientes todavía (o baja el mínimo de envíos con el filtro de arriba).</td></tr>'
+
+    contenido = f"""
+    <div class="card">
+      <form method="GET" action="/campania/top-mensajes" class="filtros">
+        <input type="hidden" name="pw" value="{pw}">
+        <div><label>Mínimo de envíos para calificar</label><input type="text" name="min" value="{minimo_envios}"></div>
+        <button type="submit">Aplicar</button>
+      </form>
+    </div>
+    <div class="table-wrap">
+      <table>
+      <tr><th>Tipo</th><th>Intento</th><th>Mensaje</th><th>Enviados</th><th>Abiertos</th><th>Tasa</th></tr>
+      {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, "Top mensajes", "Ranking por tasa de apertura", contenido, activo="top")
+
+@con_log_errores
+def handle_confirmar_click_campania(code, request):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT celular, tipo_cliente FROM campania_links WHERE code = %s", (code,))
+            row = cur.fetchone()
+            if not row:
+                return ("", 204)
+            celular, tipo_cliente = row
+
+            cur.execute("""
+                UPDATE campania_links SET
+                    clicked_at = COALESCE(clicked_at, NOW()),
+                    click_count = click_count + 1
+                WHERE code = %s
+            """, (code,))
+
+            cur.execute("""
+                UPDATE campania_contactos SET
+                    convertido = TRUE,
+                    fecha_conversion = COALESCE(fecha_conversion, NOW())
+                WHERE telefono1 = %s AND tipo_cliente = %s
+            """, (celular, tipo_cliente))
+
+            conn.commit()
+    finally:
+        conn.close()
+
+    return ("", 204)
+
+@con_log_errores
+def handle_reporte_envios_campania(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    fecha_inicio = request.args.get("fecha_inicio", "")
+    fecha_fin = request.args.get("fecha_fin", "")
+    tipo_filtro = request.args.get("tipo_cliente", "")
+    campana_filtro = request.args.get("campana", "")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT tipo_cliente FROM campania_plantillas ORDER BY tipo_cliente")
+            tipos = [r[0] for r in cur.fetchall()]
+
+            cur.execute("SELECT DISTINCT campana FROM campania_links WHERE campana IS NOT NULL AND campana != '' ORDER BY campana")
+            campanas = [r[0] for r in cur.fetchall()]
+
+            where = ["1=1"]
+            params = []
+            if fecha_inicio:
+                where.append("creado_at >= %s")
+                params.append(fecha_inicio)
+            if fecha_fin:
+                where.append("creado_at < (%s::date + INTERVAL '1 day')")
+                params.append(fecha_fin)
+            if tipo_filtro:
+                where.append("tipo_cliente = %s")
+                params.append(tipo_filtro)
+            if campana_filtro:
+                where.append("campana = %s")
+                params.append(campana_filtro)
+            where_sql = " AND ".join(where)
+
+            cur.execute(f"""
+                SELECT
+                    COUNT(*) AS total_enviados,
+                    SUM(CASE WHEN entregado THEN 1 ELSE 0 END) AS total_entregados,
+                    SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS total_abiertos,
+                    SUM(CASE WHEN error_envio IS NOT NULL THEN 1 ELSE 0 END) AS total_errores
+                FROM campania_links
+                WHERE {where_sql}
+            """, params)
+            total_env, total_ent, total_abi, total_err = cur.fetchone()
+
+            cur.execute(f"""
+                SELECT
+                    creado_at::date AS fecha,
+                    tipo_cliente,
+                    campana,
+                    COUNT(*) AS enviados,
+                    SUM(CASE WHEN entregado THEN 1 ELSE 0 END) AS entregados,
+                    SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS abiertos,
+                    SUM(CASE WHEN error_envio IS NOT NULL THEN 1 ELSE 0 END) AS errores
+                FROM campania_links
+                WHERE {where_sql}
+                GROUP BY creado_at::date, tipo_cliente, campana
+                ORDER BY fecha DESC, tipo_cliente
+            """, params)
+            filas = cur.fetchall()
+    finally:
+        conn.close()
+
+    opciones_tipo = "".join(
+        f'<option value="{t}" {"selected" if t == tipo_filtro else ""}>{t}</option>' for t in tipos
+    )
+    opciones_campana = "".join(
+        f'<option value="{c}" {"selected" if c == campana_filtro else ""}>{c}</option>' for c in campanas
+    )
+
+    filas_html = ""
+    for fecha, tipo_cliente, campana, enviados, entregados, abiertos, errores in filas:
+        tasa_apertura = round(100.0 * (abiertos or 0) / enviados, 1) if enviados else 0
+        color_err = 'style="color:var(--sanitas-danger);font-weight:600;"' if errores else ""
+        filas_html += f"""<tr>
+            <td>{fecha}</td><td>{tipo_cliente}</td><td>{campana or ''}</td>
+            <td>{enviados}</td><td>{entregados or 0}</td>
+            <td>{abiertos or 0} ({tasa_apertura}%)</td>
+            <td {color_err}>{errores or 0}</td>
+        </tr>"""
+
+    contenido = f"""
+    <div class="card">
+      <form method="GET" action="/campania/reporte-envios" class="filtros">
+        <input type="hidden" name="pw" value="{pw}">
+        <div><label>Desde</label><input type="date" name="fecha_inicio" value="{fecha_inicio}"></div>
+        <div><label>Hasta</label><input type="date" name="fecha_fin" value="{fecha_fin}"></div>
+        <div><label>Tipo cliente</label>
+          <select name="tipo_cliente"><option value="">Todos</option>{opciones_tipo}</select>
+        </div>
+        <div><label>Campaña</label>
+          <select name="campana"><option value="">Todas</option>{opciones_campana}</select>
+        </div>
+        <button type="submit">Filtrar</button>
+      </form>
+    </div>
+
+    <div class="card" style="display:flex;gap:30px;flex-wrap:wrap;">
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Total enviados</div><div style="font-size:24px;font-weight:700;">{total_env or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Entregados</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-teal-dark);">{total_ent or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Abiertos</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-success);">{total_abi or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Errores</div><div style="font-size:24px;font-weight:700;color:{'var(--sanitas-danger)' if total_err else 'inherit'};">{total_err or 0}</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+      <tr><th>Fecha</th><th>Tipo</th><th>Campaña</th><th>Enviados</th><th>Entregados</th><th>Abiertos</th><th>Errores</th></tr>
+      {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, "Reporte de envíos", "Filtra por fecha, tipo y campaña", contenido, activo="envios")
+
+@con_log_errores
+def handle_ver_contactos_campania(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    fecha_inicio = request.args.get("fecha_inicio", "")
+    fecha_fin = request.args.get("fecha_fin", "")
+    celular_busqueda = request.args.get("celular", "").strip()
+    tipo_filtro = request.args.get("tipo_cliente", "")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT tipo_cliente FROM campania_contactos ORDER BY tipo_cliente")
+            tipos = [r[0] for r in cur.fetchall()]
+
+            where = ["1=1"]
+            params = []
+            if fecha_inicio:
+                where.append("creado_at::date >= %s")
+                params.append(fecha_inicio)
+            if fecha_fin:
+                where.append("creado_at::date <= %s")
+                params.append(fecha_fin)
+            if celular_busqueda:
+                where.append("telefono1 ILIKE %s")
+                params.append(f"%{celular_busqueda}%")
+            if tipo_filtro:
+                where.append("tipo_cliente = %s")
+                params.append(tipo_filtro)
+            where_sql = " AND ".join(where)
+
+            cur.execute(f"""
+                SELECT nombre, telefono1, tipo_cliente, creado_at, convertido
+                FROM campania_contactos
+                WHERE {where_sql}
+                ORDER BY creado_at DESC, nombre
+                LIMIT 300
+            """, params)
+            filas = cur.fetchall()
+
+            cur.execute(f"SELECT COUNT(*) FROM campania_contactos WHERE {where_sql}", params)
+            total = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    opciones_tipo = "".join(
+        f'<option value="{t}" {"selected" if t == tipo_filtro else ""}>{t}</option>' for t in tipos
+    )
+
+    filas_html = ""
+    for nombre, tel1, tipo_cliente, creado_at, convertido in filas:
+        fecha_mostrada = creado_at.strftime('%Y-%m-%d') if creado_at else ''
+        badge = '<span class="badge badge-ok">✅ Sí</span>' if convertido else '<span class="badge badge-neutro">—</span>'
+        filas_html += f"""<tr>
+            <td>{nombre or ''}</td><td>{tel1}</td>
+            <td>{tipo_cliente}</td><td>{fecha_mostrada}</td>
+            <td>{badge}</td>
+        </tr>"""
+
+    aviso_limite = f'<p class="msg-aviso">Mostrando primeros 300 de {total} resultados. Afina los filtros para ver menos.</p>' if total > 300 else ""
+
+    contenido = f"""
+    <div class="card">
+      <form method="GET" action="/campania/ver-contactos" class="filtros">
+        <input type="hidden" name="pw" value="{pw}">
+        <div><label>Fecha carga desde</label><input type="date" name="fecha_inicio" value="{fecha_inicio}"></div>
+        <div><label>Fecha carga hasta</label><input type="date" name="fecha_fin" value="{fecha_fin}"></div>
+        <div><label>Celular contiene</label><input type="text" name="celular" value="{celular_busqueda}" placeholder="ej. 9878"></div>
+        <div><label>Tipo cliente</label>
+          <select name="tipo_cliente"><option value="">Todos</option>{opciones_tipo}</select>
+        </div>
+        <button type="submit">Buscar</button>
+      </form>
+    </div>
+    {aviso_limite}
+    <div class="table-wrap">
+      <table>
+        <tr><th>Nombre</th><th>Tel 1</th><th>Tipo</th><th>Fecha carga</th><th>Convertido</th></tr>
+        {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, f"Contactos ({total})", "Búsqueda y filtros de la base cargada", contenido, activo="contactos")
+
+from google.cloud import storage
+
+BUCKET_CAMPANIA_IMAGENES = os.environ.get("BUCKET_ARCHIVOS", "sanitas-campania-imagenes")
+PREFIX_CAMPANIA_IMAGENES = "campania-static/"
+
+def _storage_client_campania():
+    return storage.Client()
+
+def _listar_imagenes_campania():
+    client = _storage_client_campania()
+    bucket = client.bucket(BUCKET_CAMPANIA_IMAGENES)
+    blobs = bucket.list_blobs(prefix=PREFIX_CAMPANIA_IMAGENES)
+    resultado = []
+    for blob in blobs:
+        if blob.name == PREFIX_CAMPANIA_IMAGENES:
+            continue
+        resultado.append({
+            "nombre": blob.name.replace(PREFIX_CAMPANIA_IMAGENES, ""),
+            "url": blob.public_url,
+            "tamano_kb": round(blob.size / 1024, 1) if blob.size else 0,
+        })
+    return resultado
+
+def _subir_imagen_campania(archivo_flask):
+    client = _storage_client_campania()
+    bucket = client.bucket(BUCKET_CAMPANIA_IMAGENES)
+    blob = bucket.blob(f"{PREFIX_CAMPANIA_IMAGENES}{archivo_flask.filename}")
+    blob.upload_from_file(archivo_flask.stream, content_type=archivo_flask.content_type)
+    return blob.public_url
+
+def _eliminar_imagen_campania(nombre_archivo):
+    client = _storage_client_campania()
+    bucket = client.bucket(BUCKET_CAMPANIA_IMAGENES)
+    bucket.blob(f"{PREFIX_CAMPANIA_IMAGENES}{nombre_archivo}").delete()
+
+@con_log_errores
+def handle_imagenes_campania(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    mensaje = ""
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+        if accion == "subir":
+            if "archivo" not in request.files or request.files["archivo"].filename == "":
+                mensaje = '<p class="msg-error">Selecciona una imagen.</p>'
+            else:
+                try:
+                    url = _subir_imagen_campania(request.files["archivo"])
+                    mensaje = f'<p class="msg-exito">✅ Imagen subida. URL pública: <code>{url}</code></p>'
+                except Exception as e:
+                    mensaje = f'<p class="msg-error">Error al subir: {e}</p>'
+        elif accion == "eliminar":
+            nombre = request.form.get("nombre")
+            try:
+                _eliminar_imagen_campania(nombre)
+                mensaje = f'<p class="msg-exito">🗑️ Imagen eliminada: {nombre}</p>'
+            except Exception as e:
+                mensaje = f'<p class="msg-error">Error al eliminar: {e}</p>'
+
+    imagenes = _listar_imagenes_campania()
+
+    filas_html = ""
+    for img in imagenes:
+        filas_html += f"""<tr>
+            <td><img src="{img['url']}" style="max-width:70px;max-height:70px;border-radius:6px;"></td>
+            <td>{img['nombre']}</td>
+            <td>{img['tamano_kb']} KB</td>
+            <td><input type="text" value="{img['url']}" readonly style="width:100%;font-size:11px;" onclick="this.select();"></td>
+            <td>
+                <form method="POST" action="/campania/imagenes?pw={pw}" onsubmit="return confirm('¿Eliminar {img['nombre']}?');" style="margin:0;">
+                    <input type="hidden" name="accion" value="eliminar">
+                    <input type="hidden" name="nombre" value="{img['nombre']}">
+                    <button type="submit" class="danger" style="margin:0;padding:8px 14px;font-size:13px;">Eliminar</button>
+                </form>
+            </td>
+        </tr>"""
+
+    contenido = f"""
+    <div class="card">
+      <form method="POST" action="/campania/imagenes?pw={pw}" enctype="multipart/form-data">
+        <input type="hidden" name="accion" value="subir">
+        <label>Nueva imagen (usada en previews de WhatsApp / Open Graph)</label>
+        <input type="file" name="archivo" accept="image/*" required>
+        <button type="submit">Subir imagen</button>
+      </form>
+      {mensaje}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Vista previa</th><th>Nombre</th><th>Tamaño</th><th>URL pública</th><th></th></tr>
+        {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, "Gestor de imágenes", "Imágenes públicas para Open Graph (Cloud Storage)", contenido, activo="imagenes")
+
+from datetime import date
+
+@con_log_errores
+def handle_mensajes_por_dia_campania(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    hoy = date.today()
+    primer_dia_mes = hoy.replace(day=1).isoformat()
+
+    fecha_inicio = request.args.get("fecha_inicio") or primer_dia_mes
+    fecha_fin = request.args.get("fecha_fin") or hoy.isoformat()
+    tipo_filtro = request.args.get("tipo_cliente", "")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT tipo_cliente FROM campania_plantillas ORDER BY tipo_cliente")
+            tipos = [r[0] for r in cur.fetchall()]
+
+            where = ["creado_at >= %s", "creado_at < (%s::date + INTERVAL '1 day')"]
+            params = [fecha_inicio, fecha_fin]
+            if tipo_filtro:
+                where.append("tipo_cliente = %s")
+                params.append(tipo_filtro)
+            where_sql = " AND ".join(where)
+
+            cur.execute(f"""
+                SELECT
+                    creado_at::date AS fecha,
+                    COUNT(*) AS enviados,
+                    SUM(CASE WHEN entregado THEN 1 ELSE 0 END) AS entregados,
+                    SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS abiertos,
+                    SUM(CASE WHEN error_envio IS NOT NULL THEN 1 ELSE 0 END) AS errores
+                FROM campania_links
+                WHERE {where_sql}
+                GROUP BY creado_at::date
+                ORDER BY fecha DESC
+            """, params)
+            filas = cur.fetchall()
+
+            cur.execute(f"""
+                SELECT COUNT(*),
+                       SUM(CASE WHEN entregado THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN error_envio IS NOT NULL THEN 1 ELSE 0 END)
+                FROM campania_links
+                WHERE {where_sql}
+            """, params)
+            total_env, total_ent, total_abi, total_err = cur.fetchone()
+    finally:
+        conn.close()
+
+    opciones_tipo = "".join(
+        f'<option value="{t}" {"selected" if t == tipo_filtro else ""}>{t}</option>' for t in tipos
+    )
+
+    filas_html = ""
+    for fecha, enviados, entregados, abiertos, errores in filas:
+        tasa_apertura = round(100.0 * (abiertos or 0) / enviados, 1) if enviados else 0
+        tasa_entrega = round(100.0 * (entregados or 0) / enviados, 1) if enviados else 0
+        color_err = 'style="color:var(--sanitas-danger);font-weight:600;"' if errores else ""
+        filas_html += f"""<tr>
+            <td>{fecha.strftime('%d/%m/%Y')} <span style="color:var(--sanitas-gray);font-size:11px;">({fecha.strftime('%A')})</span></td>
+            <td><b>{enviados}</b></td>
+            <td>{entregados or 0} <span style="color:var(--sanitas-gray);font-size:11px;">({tasa_entrega}%)</span></td>
+            <td>{abiertos or 0} <span style="color:var(--sanitas-gray);font-size:11px;">({tasa_apertura}%)</span></td>
+            <td {color_err}>{errores or 0}</td>
+        </tr>"""
+
+    if not filas:
+        filas_html = '<tr><td colspan="5" style="text-align:center;color:var(--sanitas-gray);padding:20px;">No hay envíos en el rango seleccionado.</td></tr>'
+
+    contenido = f"""
+    <div class="card">
+      <form method="GET" action="/campania/mensajes-por-dia" class="filtros">
+        <input type="hidden" name="pw" value="{pw}">
+        <div><label>Desde</label><input type="date" name="fecha_inicio" value="{fecha_inicio}"></div>
+        <div><label>Hasta</label><input type="date" name="fecha_fin" value="{fecha_fin}"></div>
+        <div><label>Tipo cliente</label>
+          <select name="tipo_cliente"><option value="">Todos</option>{opciones_tipo}</select>
+        </div>
+        <button type="submit">Filtrar</button>
+      </form>
+    </div>
+
+    <div class="card" style="display:flex;gap:30px;flex-wrap:wrap;">
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Total enviados</div><div style="font-size:24px;font-weight:700;">{total_env or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Entregados</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-teal-dark);">{total_ent or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Abiertos</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-success);">{total_abi or 0}</div></div>
+      <div><div style="font-size:12px;color:var(--sanitas-gray);">Errores</div><div style="font-size:24px;font-weight:700;color:{'var(--sanitas-danger)' if total_err else 'inherit'};">{total_err or 0}</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+      <tr><th>Día</th><th>Enviados</th><th>Entregados</th><th>Abiertos</th><th>Errores</th></tr>
+      {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_campania(pw, "Mensajes por día", "Vista diaria de envíos (mes actual por defecto)", contenido, activo="por-dia")

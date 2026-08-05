@@ -18,6 +18,14 @@ import hashlib
 import base64
 import traceback
 from functools import wraps
+import secrets
+from jinja2 import Environment, FileSystemLoader
+jinja_env = Environment(loader=FileSystemLoader("templates"))
+from google.cloud import storage
+storage_client = storage.Client()
+from weasyprint import HTML
+
+
 
 
 from flask import send_from_directory
@@ -282,6 +290,10 @@ def api(request):
     if not request.path.startswith("/sctr/") and not request.path.startswith("/admision/") \
         and not request.path.startswith("/agente_kb/") and not request.path.startswith("/campania/") \
         and not request.path.startswith("/c/") and not request.path.startswith("/static/") \
+        and not request.path.startswith("/assets/") \
+        and not request.path.startswith("/programa-cronico/firmar-consentimiento") \
+        and not request.path.startswith("/programa-cronico/mantenimiento") \
+        and not (request.path.startswith("/programa-cronico/") and request.method == "GET") \
         and not validar_api_key(request):
         return (json.dumps({"error": "API Key invalida"}), 401, HEADERS)
 
@@ -379,6 +391,8 @@ def api(request):
         return handle_excel_rechazados(request)
     elif path == "/sctr/crear_grupo":
         return handle_sctr_crear_grupo(request)
+    elif path == "/programa-cronico/reenviar-danaconnect":
+        return handle_reenviar_danaconnect(request)
     elif path == "/sctr/whatsapp/resumen" and request.method == "POST":
         return handle_sctr_resumen_whatsapp(request)
     elif path == "/sctr/whatsapp/excel" and request.method == "POST":
@@ -387,6 +401,12 @@ def api(request):
         return handle_sctr_borrar_empleado(request)
     elif path == "/sctr/excel-web":
         return handle_sctr_excel_web(request)
+    elif path == "/programa-cronico/reporte" and request.method == "GET":
+        return handle_reporte_cronico(request)
+    elif path == "/programa-cronico/actualizar-contacto" and request.method == "POST":
+        return handle_actualizar_contacto_cronico(request)
+    elif path == "/programa-cronico/mantenimiento" and request.method in ("GET", "POST"):
+        return handle_mantenimiento_contacto_cronico(request) 
     elif path == "/campania/cargar-excel" and request.method == "POST":
         return handle_cargar_excel_campania(request)
     elif path == "/campania/generar-sms" and request.method == "POST":
@@ -411,6 +431,15 @@ def api(request):
         return handle_imagenes_campania(request)
     elif path == "/campania/mensajes-por-dia" and request.method == "GET":
         return handle_mensajes_por_dia_campania(request)
+    elif path == "/campania/envio-especial":
+        return handle_envio_especial_web(request)
+    elif path == "/programa-cronico/recibir-dni":
+        return handle_recibir_dni_cronico(request)
+    elif path == "/programa-cronico/firmar-consentimiento":
+        return handle_firmar_consentimiento_cronico(request)
+    elif request.path.startswith("/programa-cronico/") and request.method == "GET":
+        token = request.path.split("/programa-cronico/")[1]
+        return handle_ver_formulario_cronico(request, token)
     elif path.startswith("/sctr/") and request.method == "GET" and len(path.split("/")) == 3:
         codigo = path.split("/")[2]
         return handle_sctr_form(request, codigo)
@@ -434,6 +463,9 @@ def api(request):
     elif path.startswith("/static/"):
         filename = path.split("/static/")[1]
         return handle_static_campania(filename)
+    elif path.startswith("/assets/"):
+        filename = path.split("/assets/")[1]
+        return handle_static_assets(filename)
 
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
@@ -3980,6 +4012,7 @@ def _layout_campania(pw, titulo, subtitulo, contenido_html, activo=""):
       {link("/campania/reporte-envios", "📅 Envíos", "envios")}
       {link("/campania/mensajes-por-dia", "📆 Por día", "por-dia")}
       {link("/campania/top-mensajes", "🏆 Top mensajes", "top")}
+      {link("/campania/envio-especial", "✈️ Envío Especial", "especial")}
     </nav>"""
 
     return f"""<!DOCTYPE html>
@@ -3987,7 +4020,9 @@ def _layout_campania(pw, titulo, subtitulo, contenido_html, activo=""):
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>{titulo} - Sanitas</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
   <style>{CAMPANIA_CSS}</style>
 </head>
 <body>
@@ -4548,6 +4583,9 @@ def handle_reporte_clicks_campania(request):
 def handle_static_campania(filename):
     return send_from_directory("static", filename)
 
+def handle_static_assets(filename):
+    return send_from_directory("assets", filename)
+
 def con_log_errores(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -4995,6 +5033,7 @@ def handle_ver_contactos_campania(request):
     fecha_fin = request.args.get("fecha_fin", "")
     celular_busqueda = request.args.get("celular", "").strip()
     tipo_filtro = request.args.get("tipo_cliente", "")
+    convertido_filtro = request.args.get("convertido", "")
 
     conn = get_connection()
     try:
@@ -5016,6 +5055,10 @@ def handle_ver_contactos_campania(request):
             if tipo_filtro:
                 where.append("tipo_cliente = %s")
                 params.append(tipo_filtro)
+            if convertido_filtro == "si":
+                where.append("convertido = TRUE")
+            elif convertido_filtro == "no":
+                where.append("(convertido = FALSE OR convertido IS NULL)")
             where_sql = " AND ".join(where)
 
             cur.execute(f"""
@@ -5034,6 +5077,11 @@ def handle_ver_contactos_campania(request):
 
     opciones_tipo = "".join(
         f'<option value="{t}" {"selected" if t == tipo_filtro else ""}>{t}</option>' for t in tipos
+    )
+
+    opciones_convertido = "".join(
+        f'<option value="{v}" {"selected" if v == convertido_filtro else ""}>{label}</option>'
+        for v, label in [("si", "Sí"), ("no", "No")]
     )
 
     filas_html = ""
@@ -5057,6 +5105,9 @@ def handle_ver_contactos_campania(request):
         <div><label>Celular contiene</label><input type="text" name="celular" value="{celular_busqueda}" placeholder="ej. 9878"></div>
         <div><label>Tipo cliente</label>
           <select name="tipo_cliente"><option value="">Todos</option>{opciones_tipo}</select>
+        </div>
+        <div><label>Convertido</label>
+          <select name="convertido"><option value="">Todos</option>{opciones_convertido}</select>
         </div>
         <button type="submit">Buscar</button>
       </form>
@@ -5275,3 +5326,1780 @@ def handle_mensajes_por_dia_campania(request):
     """
 
     return _layout_campania(pw, "Mensajes por día", "Vista diaria de envíos (mes actual por defecto)", contenido, activo="por-dia")
+
+@con_log_errores
+def handle_envio_especial_web(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CAMPANIA:
+        return "No autorizado", 401
+
+    mensaje_resultado = ""
+
+    # Lista de imágenes ya subidas al bucket, para elegir en un <select>
+    imagenes = _listar_imagenes_campania()
+    opciones_imagenes = "".join(
+        f'<option value="{img["nombre"]}">{img["nombre"]} ({img["tamano_kb"]} KB)</option>'
+        for img in imagenes
+    )
+
+    if request.method == "POST":
+        tipo_cliente = (request.form.get("tipo_cliente") or "").strip().upper()
+        campana = (request.form.get("campana") or "").strip()
+        mensaje_tpl = (request.form.get("mensaje") or "").strip()
+        whatsapp_destino = (request.form.get("whatsapp_destino") or "").strip()
+        og_title = (request.form.get("og_title") or "Sanitas Perú").strip()
+        og_description = (request.form.get("og_description") or "Contáctanos por WhatsApp").strip()
+        og_image = (request.form.get("og_image") or "").strip()
+        archivo = request.files.get("archivo")
+
+        errores_validacion = []
+        if not tipo_cliente:
+            errores_validacion.append("nombre identificador requerido")
+        if not campana:
+            errores_validacion.append("nombre de campaña requerido")
+        if not mensaje_tpl:
+            errores_validacion.append("mensaje requerido")
+        if not whatsapp_destino:
+            errores_validacion.append("whatsapp destino requerido")
+        if not og_image:
+            errores_validacion.append("selecciona una imagen")
+        if not archivo or archivo.filename == "":
+            errores_validacion.append("archivo Excel requerido")
+
+        filas = None
+
+        if errores_validacion:
+            mensaje_resultado = f'<p class="msg-error">{"; ".join(errores_validacion)}</p>'
+        else:
+            try:
+                wb = openpyxl.load_workbook(archivo, read_only=True, data_only=True)
+                ws = wb.active
+                filas = []
+                headers = None
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i == 0:
+                        headers = [str(h).strip().lower() for h in row]
+                        continue
+                    data = dict(zip(headers, row))
+                    telefono1 = str(data.get("telefono1") or "").strip()
+                    if not telefono1:
+                        continue
+                    filas.append((
+                        str(data.get("nombre") or "").strip(),
+                        telefono1,
+                        tipo_cliente
+                    ))
+                wb.close()
+            except Exception as e:
+                filas = None
+                mensaje_resultado = f'<p class="msg-error">Error al leer el Excel: {e}</p>'
+
+            if filas is not None:
+                if not filas:
+                    mensaje_resultado = '<p class="msg-error">No se encontraron filas válidas (columna telefono1 requerida).</p>'
+                else:
+                    conn = get_connection()
+                    try:
+                        with conn.cursor() as cur:
+                            # Crea o actualiza la plantilla de este envío especial
+                            cur.execute("""
+                                INSERT INTO campania_plantillas
+                                    (tipo_cliente, mensaje, og_title, og_description, og_image, whatsapp_destino, actualizado_at)
+                                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                                ON CONFLICT (tipo_cliente) DO UPDATE SET
+                                    mensaje = EXCLUDED.mensaje,
+                                    og_title = EXCLUDED.og_title,
+                                    og_description = EXCLUDED.og_description,
+                                    og_image = EXCLUDED.og_image,
+                                    whatsapp_destino = EXCLUDED.whatsapp_destino,
+                                    actualizado_at = NOW()
+                            """, (tipo_cliente, mensaje_tpl, og_title, og_description, og_image, whatsapp_destino))
+
+                            execute_values(cur, """
+                                INSERT INTO campania_contactos
+                                    (nombre, telefono1, tipo_cliente)
+                                VALUES %s
+                                ON CONFLICT (telefono1, tipo_cliente) DO UPDATE SET
+                                    nombre = EXCLUDED.nombre,
+                                    actualizado_at = NOW()
+                            """, filas)
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+                    try:
+                        # excluir_convertidos=False: es una lista nueva y puntual,
+                        # queremos enviar a todos los que están en el Excel.
+                        # max_intentos=1: un envío especial normalmente no necesita
+                        # reintentos automáticos, pero puedes volver a correr este
+                        # mismo formulario con el mismo tipo_cliente si hace falta.
+                        resultados, omitidos = _generar_y_enviar_campania(
+                            tipo_cliente, campana, excluir_convertidos=False, max_intentos=1
+                        )
+                    except ValueError as e:
+                        mensaje_resultado = f'<p class="msg-error">{e}</p>'
+                        resultados = None
+
+                    if resultados is not None:
+                        exitosos = sum(1 for _, _, ok, _ in resultados if ok)
+                        fallidos = len(resultados) - exitosos
+                        mensaje_resultado = f"""
+                        <p class="msg-exito">✅ {len(filas)} contactos cargados en <b>{tipo_cliente}</b>.
+                        Envío: {exitosos} exitosos{f', ❌ {fallidos} con error' if fallidos else ''}.</p>
+                        <p style="margin-top:14px;">
+                          <a href="/campania/reporte-clicks?pw={pw}">Ver seguimiento de aperturas (clics) →</a>
+                        </p>
+                        """
+
+    contenido = f"""
+    <div class="card">
+      <p style="color:var(--sanitas-gray);margin-top:0;">
+        Envío puntual con lista de números, mensaje e imagen propios (no se mezcla
+        con las campañas de retención regulares). El Excel debe tener columnas
+        <b>nombre, telefono1</b>.
+      </p>
+      <form method="POST" action="/campania/envio-especial?pw={pw}" enctype="multipart/form-data"
+            onsubmit="return confirm('Esto enviará SMS reales por Danaconnect a los números del Excel. ¿Continuar?');">
+        <label>Nombre identificador (ej. ESPECIAL_DIA_MADRE)</label>
+        <input type="text" name="tipo_cliente" required>
+        <label>Nombre de campaña (para reportes)</label>
+        <input type="text" name="campana" placeholder="ej. especial_ago2026" required>
+        <label>Archivo Excel (columnas: nombre, telefono1)</label>
+        <input type="file" name="archivo" accept=".xlsx,.xls" required>
+        <label>Mensaje (usa {{Nombre}} y {{LINK}})</label>
+        <textarea name="mensaje" rows="3" required></textarea>
+        <label>WhatsApp destino (código país + número, sin +)</label>
+        <input type="text" name="whatsapp_destino" required>
+        <label>Imagen (preview de WhatsApp)</label>
+        <select name="og_image" required>
+          <option value="">-- selecciona --</option>
+          {opciones_imagenes}
+        </select>
+        <label>OG Title</label>
+        <input type="text" name="og_title" value="Sanitas Perú">
+        <label>OG Description</label>
+        <input type="text" name="og_description" value="Contáctanos por WhatsApp">
+        <button type="submit">Cargar y enviar envío especial</button>
+      </form>
+      {mensaje_resultado}
+    </div>
+    """
+
+    return _layout_campania(pw, "Envío especial", "Carga puntual: Excel + mensaje + imagen propios", contenido, activo="especial")
+
+# ───────────────────────────────────────────────────────────────
+# Prioridad de programas (más complejo = número más alto)
+# ───────────────────────────────────────────────────────────────
+import xml.etree.ElementTree as ET
+
+DANACONNECT_USER = os.environ.get("DANACONNECT_USER", "canalesAPI@sanitasperu")
+DANACONNECT_PASSWORD = os.environ.get("DANACONNECT_PASSWORD")
+DANACONNECT_CONVERSATION_ID = "597680"
+DANACONNECT_CONVERSATION_ID_CRONICO = "597709"
+
+DANACONNECT_FILE2_POR_PROGRAMA = {
+    "vive_sano_completo": "s3://WS/2026/7/1a20c4f50f4cc80ecbf06c9ad0ac3923.jpg",
+    "krystal": "s3://WS/2026/7/291e2a5cbbd575dce140de36ad935c2f.jpg",
+}
+
+DANACONNECT_NOMBRE_PROGRAMA = {
+    "vive_sano_completo": "VIVE SANO",
+    "krystal": "KRYSTAL",
+}
+
+def _content_type_por_url(url):
+    return "application/pdf" if url.lower().endswith(".pdf") else "image/jpeg"
+
+def descargar_blob_desde_url(url):
+    """
+    Descarga un archivo privado de Cloud Storage usando la librería oficial,
+    evitando requests.get() y errores 403.
+    """
+
+    # Ejemplo:
+    # https://storage.googleapis.com/sanitas-programa-cronico/programa-cronico/token/dni.jpg
+
+    partes = url.replace("https://storage.googleapis.com/", "").split("/", 1)
+
+    if len(partes) != 2:
+        raise ValueError(f"URL de Cloud Storage inválida: {url}")
+
+    bucket_name, blob_name = partes
+
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    return blob.download_as_bytes()
+
+
+def subir_archivo_danaconnect(archivo_bytes, nombre_archivo, content_type):
+    url = "https://appserv.danaconnect.com/dana/conversation/http/rest/file/upload"
+    resp = requests.post(
+        url,
+        auth=(DANACONNECT_USER, DANACONNECT_PASSWORD),
+        files={"file": (nombre_archivo, archivo_bytes, content_type)},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+    root = ET.fromstring(resp.text)
+    file_id = root.findtext("fileID")
+    if not file_id:
+        raise ValueError(f"Danaconnect no devolvió fileID: {resp.text}")
+    return file_id
+
+
+def iniciar_conversacion_danaconnect(n_documento, nombre_completo, email, programa, file_id_pdf,
+                                       file_id_dni_a, file_id_dni_r, file_id_receta):
+    url = f"https://appserv.danaconnect.com/api/1.0/rest/conversation/{DANACONNECT_CONVERSATION_ID}/start/data"
+    nombre_programa_dana = DANACONNECT_NOMBRE_PROGRAMA.get(programa, programa.upper())
+    file2 = DANACONNECT_FILE2_POR_PROGRAMA.get(programa)
+
+    payload = {
+        "N_DOCUMENTO": n_documento,
+        "NOMBRE": nombre_completo,
+        "EMAIL": email,
+        "PROGRAMA": nombre_programa_dana,
+        "FILE": file_id_pdf,
+        "FILE2": file2,
+        "FILE_DNI_A": file_id_dni_a,
+        "FILE_DNI_R": file_id_dni_r,
+        "FILE_RECETA": file_id_receta,
+    }
+
+    resp = requests.post(
+        url,
+        auth=(DANACONNECT_USER, DANACONNECT_PASSWORD),
+        json=payload,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.text
+
+def iniciar_conversacion_cronico_complejo(nombre, email_destino, programa, celular, n_documento, correo_paciente, file_id_dni_a, file_id_dni_r,
+    file_id_receta):
+    
+    url = (
+        f"https://appserv.danaconnect.com/api/1.0/rest/conversation/"
+        f"{DANACONNECT_CONVERSATION_ID_CRONICO}/start/data"
+    )
+
+    payload = {
+        "NOMBRE": nombre,
+        "EMAIL": email_destino,
+        "PROGRAMA": programa,
+        "CELULAR": celular,
+        "N_DOCUMENTO": n_documento,
+        "CORREO_PACIENTE": correo_paciente,
+        "FILE_DNI_A": file_id_dni_a,
+        "FILE_DNI_R": file_id_dni_r,
+        "FILE_RECETA": file_id_receta,
+    }
+
+    resp = requests.post(
+        url,
+        auth=(DANACONNECT_USER, DANACONNECT_PASSWORD),
+        json=payload,
+        timeout=30,
+    )
+
+    print(f"[DEBUG Danaconnect Cronico] status={resp.status_code} respuesta={resp.text}")
+
+    resp.raise_for_status()
+    return resp.text
+
+def notificar_danaconnect(n_documento, nombres, apellidos, correo, programa, pdf_bytes,
+                            dni_anverso_url, dni_reverso_url, url_receta_bucket):
+    nombre_completo = f"{nombres} {apellidos}".strip()
+
+    file_id_pdf = subir_archivo_danaconnect(pdf_bytes, "consentimiento.pdf", "application/pdf")
+
+    # ── DNI anverso ──
+    archivo_dni_a = descargar_blob_desde_url(dni_anverso_url)
+
+    ext_a = "pdf" if _content_type_por_url(dni_anverso_url) == "application/pdf" else "jpg"
+
+    file_id_dni_a = subir_archivo_danaconnect(
+        archivo_dni_a,
+        f"dni_anverso.{ext_a}",
+        _content_type_por_url(dni_anverso_url)
+    )
+
+    # ── DNI reverso (si no existe, reusamos el anverso para no romper el payload) ──
+    if dni_reverso_url:
+        archivo_dni_r = descargar_blob_desde_url(dni_reverso_url)
+
+        ext_r = "pdf" if _content_type_por_url(dni_reverso_url) == "application/pdf" else "jpg"
+
+        file_id_dni_r = subir_archivo_danaconnect(
+            archivo_dni_r,
+            f"dni_reverso.{ext_r}",
+            _content_type_por_url(dni_reverso_url)      
+        )
+    else:
+        file_id_dni_r = file_id_dni_a
+
+    # ── Receta ──
+    archivo_receta = descargar_blob_desde_url(url_receta_bucket)
+
+    ext_receta = ("pdf" if _content_type_por_url(url_receta_bucket) == "application/pdf" else "jpg")
+
+    file_id_receta = subir_archivo_danaconnect(
+            archivo_receta,
+            f"receta.{ext_receta}",
+            _content_type_por_url(url_receta_bucket)
+    )
+
+    iniciar_conversacion_danaconnect(
+        n_documento, nombre_completo, correo, programa, file_id_pdf,
+        file_id_dni_a, file_id_dni_r, file_id_receta
+    )
+
+PRIORIDAD_PROGRAMAS = {
+    "cronico_complejo": 4,
+    "krystal": 3,
+    "vive_sano_completo": 2,
+    "vive_sano_peas": 1,
+}
+
+def _normalizar_nombre(nombre):
+    nombre = (nombre or "").upper()
+    nombre = re.sub(r"[.,;:]", " ", nombre)  # quita comas, puntos, etc.
+    nombre = re.sub(r"\s+", " ", nombre).strip()
+    return nombre
+
+def _nombres_coinciden(nombre1, nombre2, umbral=0.85):
+    import jellyfish
+    n1 = _normalizar_nombre(nombre1)
+    n2 = _normalizar_nombre(nombre2)
+    if not n1 or not n2:
+        return False
+
+    # Comparación 1: string completo
+    similitud_completa = jellyfish.jaro_winkler_similarity(n1, n2)
+    if similitud_completa >= umbral:
+        return True
+
+    # Comparación 2: por conjunto de palabras (tolera orden distinto, ej. apellidos/nombres invertidos)
+    palabras1 = set(n1.split())
+    palabras2 = set(n2.split())
+    if not palabras1 or not palabras2:
+        return False
+
+    coincidencias = 0
+    for p1 in palabras1:
+        mejor = max((jellyfish.jaro_winkler_similarity(p1, p2) for p2 in palabras2), default=0)
+        if mejor >= 0.85:
+            coincidencias += 1
+
+    proporcion = coincidencias / max(len(palabras1), len(palabras2))
+    return proporcion >= 0.75
+
+def extraer_datos_receta(archivo_bytes, mime_type="image/jpeg"):
+    nombre_procesador = docai_client.processor_path(DOCAI_PROJECT_ID, DOCAI_LOCATION, DOCAI_PROCESSOR_ID)
+    raw_document = documentai.RawDocument(content=archivo_bytes, mime_type=mime_type)
+    request_docai = documentai.ProcessRequest(name=nombre_procesador, raw_document=raw_document)
+    resultado = docai_client.process_document(request=request_docai)
+    texto_crudo = resultado.document.text
+
+    if not texto_crudo or len(texto_crudo.strip()) < 10:
+        return {"nombre_paciente": None, "fecha_emision": None, "diagnosticos": []}
+
+    prompt = f"""
+Extrae los siguientes datos de esta receta médica peruana. Responde SOLO con JSON,
+sin explicación, sin markdown, sin backticks.
+
+Formato exacto:
+{{
+  "nombre_paciente": "nombre completo del paciente tal como aparece, en mayúsculas o null",
+  "n_documento_paciente": "número de DNI del paciente si aparece impreso en la receta, o null",
+  "fecha_emision": "YYYY-MM-DD o null si no se encuentra",
+  "diagnosticos": [
+    {{"cie10": "código CIE-10 EXACTO tal como está impreso, incluyendo cualquier sufijo después del punto (ej. I10.X, E11.9), sin recortar ni simplificar nada", "descripcion": "descripción del diagnóstico"}}
+  ]
+}}
+
+IMPORTANTE sobre el código CIE-10: el PRIMER carácter de un código CIE-10 SIEMPRE es una
+letra (A-Z), nunca un dígito. Si el texto original parece mostrar un número en esa primera
+posición (por ejemplo, un "1" que en realidad es la letra "I", o un "0" que en realidad es
+la letra "O"), corrígelo a la letra correspondiente. El resto del código sí puede tener dígitos.
+
+Si hay más de un diagnóstico, inclúyelos todos en la lista. Si no encuentras código CIE-10
+explícito para un diagnóstico, deja cie10 como null.
+
+Texto extraído del documento:
+{texto_crudo}
+"""
+
+    respuesta = gemini_model.generate_content(prompt)
+    texto_respuesta = respuesta.text.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        datos = json.loads(texto_respuesta)
+    except json.JSONDecodeError:
+        datos = {"nombre_paciente": None, "fecha_emision": None, "diagnosticos": []}
+    return datos
+
+_CONFUSIONES_OCR_INICIAL = {"1": "I", "0": "O", "5": "S", "8": "B", "6": "G", "2": "Z"}
+
+def _generar_candidatos_cie10(cie10_limpio):
+    candidatos = [cie10_limpio]
+    if cie10_limpio and cie10_limpio[0] in _CONFUSIONES_OCR_INICIAL:
+        corregido = _CONFUSIONES_OCR_INICIAL[cie10_limpio[0]] + cie10_limpio[1:]
+        candidatos.append(corregido)
+    return candidatos
+
+def determinar_programa_por_diagnosticos(diagnosticos_receta, cur):
+    matches = []  # lista de (programa, cie10, descripcion) por cada diagnóstico encontrado
+
+    for diag in diagnosticos_receta:
+        cie10 = _limpiar_cie10(diag.get("cie10"))
+        if not cie10:
+            continue
+
+        row = None
+        cie10_encontrado = None
+        for candidato in _generar_candidatos_cie10(cie10):
+            cur.execute("SELECT programa, descripcion FROM sofi_programa_diagnosticos WHERE UPPER(TRIM(cie_10)) = %s", (candidato,))
+            row = cur.fetchone()
+            if row:
+                cie10_encontrado = candidato
+                break
+
+            cur.execute("SELECT programa, descripcion FROM sofi_programa_diagnosticos WHERE UPPER(TRIM(cie_10)) LIKE %s", (candidato + "%",))
+            row = cur.fetchone()
+            if row:
+                cie10_encontrado = candidato
+                break
+
+        if row:
+            programa_encontrado, descripcion_bd = row
+            matches.append((programa_encontrado, cie10_encontrado, descripcion_bd))
+
+    if not matches:
+        return None, None, None
+
+    # ── Regla especial: 2 o más diagnósticos de Vive Sano → se sube a Krystal ──
+    conteo_vive_sano = sum(1 for m in matches if m[0] == "vive_sano_completo")
+    if conteo_vive_sano >= 2:
+        matches = [
+            ("krystal", cie10, desc) if programa == "vive_sano_completo" else (programa, cie10, desc)
+            for (programa, cie10, desc) in matches
+        ]
+
+    # ── Elegir el de mayor prioridad entre todos los matches (ya con la regla aplicada) ──
+    mejor_programa, mejor_cie10, mejor_descripcion = max(
+        matches, key=lambda m: PRIORIDAD_PROGRAMAS.get(m[0], 0)
+    )
+
+    return mejor_programa, mejor_cie10, mejor_descripcion
+
+def enviar_correo_cronico_complejo(nombres, apellidos, n_documento, celular, correo_paciente, programa, dni_anverso_url, dni_reverso_url,
+    receta_url):
+    
+    email_destino = "programasdesalud@sanitasperu.com"
+    
+    nombre_completo = f"{nombres} {apellidos}".strip()
+
+    # -------------------------
+    # DNI Anverso
+    # -------------------------
+    archivo_dni_a = descargar_blob_desde_url(dni_anverso_url)
+
+    ext_a = (
+        "pdf"
+        if _content_type_por_url(dni_anverso_url) == "application/pdf"
+        else "jpg"
+    )
+
+    file_id_dni_a = subir_archivo_danaconnect(
+        archivo_dni_a,
+        f"dni_anverso.{ext_a}",
+        _content_type_por_url(dni_anverso_url)
+    )
+
+    # -------------------------
+    # DNI Reverso
+    # -------------------------
+    if dni_reverso_url:
+
+        archivo_dni_r = descargar_blob_desde_url(dni_reverso_url)
+
+        ext_r = (
+            "pdf"
+            if _content_type_por_url(dni_reverso_url) == "application/pdf"
+            else "jpg"
+        )
+
+        file_id_dni_r = subir_archivo_danaconnect(
+            archivo_dni_r,
+            f"dni_reverso.{ext_r}",
+            _content_type_por_url(dni_reverso_url)
+        )
+
+    else:
+
+        file_id_dni_r = file_id_dni_a
+
+    # -------------------------
+    # Receta
+    # -------------------------
+    archivo_receta = descargar_blob_desde_url(receta_url)
+
+    ext_receta = (
+        "pdf"
+        if _content_type_por_url(receta_url) == "application/pdf"
+        else "jpg"
+    )
+
+    file_id_receta = subir_archivo_danaconnect(
+        archivo_receta,
+        f"receta.{ext_receta}",
+        _content_type_por_url(receta_url)
+    )
+
+    iniciar_conversacion_cronico_complejo(
+        nombre=nombre_completo,
+        email_destino=email_destino,
+        programa="CRÓNICO COMPLEJO",
+        celular=celular,
+        n_documento=n_documento,
+        correo_paciente=correo_paciente,
+        file_id_dni_a=file_id_dni_a,
+        file_id_dni_r=file_id_dni_r,
+        file_id_receta=file_id_receta,
+    )
+
+def _limpiar_cie10(cie10):
+    cie10 = (cie10 or "").upper()
+    cie10 = re.sub(r"[^A-Z0-9.]", "", cie10)  # quita corchetes, espacios, guiones raros, etc.
+    return cie10.strip()
+
+def _extraer_head_styles(html_completo):
+    match = re.search(r"<style[^>]*>(.*?)</style>", html_completo, re.DOTALL)
+    return match.group(1) if match else ""
+
+def _extraer_body(html_completo):
+    match = re.search(r"<body[^>]*>(.*)</body>", html_completo, re.DOTALL)
+    return match.group(1) if match else html_completo
+    
+# ──────────────────────────────────────────
+# API: Programas SUBIR DNI en imagen o PDF
+# ──────────────────────────────────────────
+from google.cloud import documentai_v1 as documentai
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+DOCAI_PROJECT_ID = "sanitas-recetas-prod"
+DOCAI_LOCATION = "us"
+DOCAI_PROCESSOR_ID = "6837fb55f199826a"  # sanitas-ocr-recetas (Document OCR genérico)
+
+docai_client = documentai.DocumentProcessorServiceClient(
+    client_options={"api_endpoint": f"{DOCAI_LOCATION}-documentai.googleapis.com"}
+)
+
+def _ocr_texto_documento(archivo_bytes, mime_type):
+    nombre_procesador = docai_client.processor_path(DOCAI_PROJECT_ID, DOCAI_LOCATION, DOCAI_PROCESSOR_ID)
+    raw_document = documentai.RawDocument(content=archivo_bytes, mime_type=mime_type)
+    request_docai = documentai.ProcessRequest(name=nombre_procesador, raw_document=raw_document)
+    resultado = docai_client.process_document(request=request_docai)
+    return resultado.document.text
+
+vertexai.init(project=DOCAI_PROJECT_ID, location="us-central1")
+gemini_model = GenerativeModel("gemini-2.5-flash-lite")
+
+def extraer_datos_dni(bytes_anverso, mime_anverso, bytes_reverso=None, mime_reverso=None):
+    texto_anverso = _ocr_texto_documento(bytes_anverso, mime_anverso)
+    texto_reverso = _ocr_texto_documento(bytes_reverso, mime_reverso) if bytes_reverso else ""
+
+    texto_crudo = f"{texto_anverso}\n\n--- REVERSO DEL DOCUMENTO ---\n\n{texto_reverso}"
+
+    if not texto_crudo.strip() or len((texto_anverso + texto_reverso).strip()) < 10:
+        return {
+            "tipo_documento": None, "n_documento": None, "nombres": None, "apellidos": None,
+            "fecha_nacimiento": None, "domicilio": None, "distrito": None,
+            "provincia": None, "departamento": None,
+            "error": "No se pudo leer texto del documento"
+        }
+
+    prompt = f"""
+Extrae los siguientes datos de este texto de un documento de identidad peruano (puede ser
+DNI, Carné de Extranjería o Pasaporte; incluye anverso y reverso si aplica).
+Responde SOLO con JSON, sin explicación, sin markdown, sin backticks.
+
+Formato exacto:
+{{
+  "tipo_documento": "uno de: DNI, CE, Pasaporte — según el tipo de documento identificado",
+  "n_documento": "número del documento o null si no se encuentra",
+  "nombres": "nombres del titular en mayúsculas o null",
+  "apellidos": "apellidos del titular (paterno y materno juntos) en mayúsculas o null",
+  "fecha_nacimiento": "YYYY-MM-DD o null si no se encuentra",
+  "domicilio": "dirección completa impresa en el reverso del documento (calle, número, urbanización) o null si no aparece",
+  "distrito": "nombre del distrito de residencia, en formato Título (ej. Santiago De Surco), o null",
+  "provincia": "nombre de la provincia de residencia, en formato Título, o null",
+  "departamento": "nombre del departamento de residencia, en formato Título, o null"
+}}
+
+Pistas para identificar el tipo de documento: si el texto menciona "DOCUMENTO NACIONAL DE
+IDENTIDAD" o "RENIEC", es DNI. Si menciona "CARNÉ DE EXTRANJERÍA" o "CARNET DE EXTRANJERIA",
+es CE. Si menciona "PASSPORT" o "PASAPORTE", es Pasaporte. Si no hay indicios claros, asume DNI.
+
+El documento suele traer una línea "Departamento/Provincia/Distrito" seguida de los tres
+valores en ese orden separados por "/". Úsala para completar distrito, provincia y departamento
+por separado.
+
+Texto extraído del documento:
+{texto_crudo}
+"""
+
+    respuesta = gemini_model.generate_content(prompt)
+    texto_respuesta = respuesta.text.strip().replace("```json", "").replace("```", "").strip()
+
+    try:
+        datos = json.loads(texto_respuesta)
+    except json.JSONDecodeError:
+        datos = {"tipo_documento": None, "n_documento": None, "nombres": None, "apellidos": None,
+                 "fecha_nacimiento": None, "domicilio": None, "distrito": None,
+                 "provincia": None, "departamento": None}
+
+    return datos
+
+# ──────────────────────────────────────────
+# API: ENDPOINT PRINCIPAL DE PROGRAMAS
+# ──────────────────────────────────────────
+BUCKET_NAME = "sanitas-programa-cronico"
+@con_log_errores
+def handle_recibir_dni_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+    if not data:
+        return (json.dumps({"error": "Body JSON inválido o vacío"}), 400, HEADERS)
+
+    celular = data.get("celular")
+    correo = data.get("correo")
+    n_documento = data.get("n_documento")
+    url_anverso = data.get("url_anverso")
+    url_reverso = data.get("url_reverso")
+    url_documento = data.get("url_documento")
+    url_receta = data.get("url_receta")
+
+    if not celular or not n_documento or not url_receta:
+        return (json.dumps({"error": "celular, n_documento y url_receta son requeridos"}), 400, HEADERS)
+
+    if not url_documento and not (url_anverso and url_reverso):
+        return (json.dumps({"error": "Debes enviar url_documento, o url_anverso y url_reverso"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # ── Buscar o crear inscripción ──
+    cur.execute("SELECT id FROM sofi_programa_cronico_inscripciones WHERE celular = %s", (celular,))
+    row = cur.fetchone()
+    if row:
+        inscripcion_id = row[0]
+        cur.execute("SELECT token FROM sofi_programa_cronico_inscripciones WHERE id = %s", (inscripcion_id,))
+        token = cur.fetchone()[0]
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET n_documento = %s, correo = %s, url_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (n_documento, correo, url_receta, inscripcion_id))
+    else:
+        token = secrets.token_urlsafe(24)
+        cur.execute("""
+            INSERT INTO sofi_programa_cronico_inscripciones (token, n_documento, celular, correo, url_receta, estado)
+            VALUES (%s, %s, %s, %s, %s, 'esperando_dni')
+            RETURNING id
+        """, (token, n_documento, celular, correo, url_receta))
+        inscripcion_id = cur.fetchone()[0]
+    conn.commit()
+
+    bucket = storage_client.bucket(BUCKET_NAME)
+
+    # ── Procesar DNI ──
+    if url_documento:
+        resp = requests.get(url_documento, timeout=20)
+        resp.raise_for_status()
+        archivo_bytes = resp.content
+        content_type = "application/pdf"
+        blob = bucket.blob(f"programa-cronico/{token}/dni_documento.pdf")
+        blob.upload_from_string(archivo_bytes, content_type=content_type)
+        cur.execute("UPDATE sofi_programa_cronico_inscripciones SET dni_foto_anverso_url = %s, actualizado_at = NOW() WHERE id = %s",
+                    (blob.public_url, inscripcion_id))
+        datos_dni = extraer_datos_dni(archivo_bytes, content_type)  # PDF único ya trae ambos lados
+    else:
+        resp_a = requests.get(url_anverso, timeout=20); resp_a.raise_for_status()
+        bytes_a = resp_a.content
+        resp_r = requests.get(url_reverso, timeout=20); resp_r.raise_for_status()
+        bytes_r = resp_r.content
+        blob_a = bucket.blob(f"programa-cronico/{token}/dni_anverso.jpg")
+        blob_a.upload_from_string(bytes_a, content_type="image/jpeg")
+        blob_r = bucket.blob(f"programa-cronico/{token}/dni_reverso.jpg")
+        blob_r.upload_from_string(bytes_r, content_type="image/jpeg")
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET dni_foto_anverso_url = %s, dni_foto_reverso_url = %s, actualizado_at = NOW() WHERE id = %s
+        """, (blob_a.public_url, blob_r.public_url, inscripcion_id))
+        datos_dni = extraer_datos_dni(bytes_a, "image/jpeg", bytes_r, "image/jpeg")  # ahora sí procesa ambos lados
+
+    # ── Ahora que ya tenemos datos_dni, guardamos nombres/domicilio/distrito ──
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET dni_validado = TRUE, nombres = %s, apellidos = %s, fecha_nacimiento = %s,
+            domicilio = %s, distrito = %s, provincia = %s, departamento = %s,
+            tipo_documento = %s, actualizado_at = NOW()
+        WHERE id = %s
+    """, (datos_dni.get("nombres"), datos_dni.get("apellidos"), datos_dni.get("fecha_nacimiento"),
+          datos_dni.get("domicilio"), datos_dni.get("distrito"),
+          datos_dni.get("provincia"), datos_dni.get("departamento"),
+          datos_dni.get("tipo_documento"), inscripcion_id))
+    conn.commit()
+
+    # ── Procesar receta ──
+    resp_receta = requests.get(url_receta, timeout=20)
+    resp_receta.raise_for_status()
+    receta_bytes = resp_receta.content
+    receta_mime = "application/pdf" if url_receta.lower().endswith(".pdf") else "image/jpeg"
+
+    blob_receta = bucket.blob(f"programa-cronico/{token}/receta.{'pdf' if receta_mime == 'application/pdf' else 'jpg'}")
+    blob_receta.upload_from_string(receta_bytes, content_type=receta_mime)
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones SET url_receta_bucket = %s, actualizado_at = NOW() WHERE id = %s
+    """, (blob_receta.public_url, inscripcion_id))
+    conn.commit()
+
+    datos_receta = extraer_datos_receta(receta_bytes, mime_type=receta_mime)
+
+    # ── Regla 1 (receta): mismo paciente que el DNI ──
+    nombre_dni_completo = f"{datos_dni.get('nombres', '')} {datos_dni.get('apellidos', '')}".strip()
+    nombre_receta = datos_receta.get("nombre_paciente") or ""
+    dni_en_receta = datos_receta.get("n_documento_paciente")
+
+    if dni_en_receta:
+        paciente_valido = dni_en_receta.strip() == n_documento.strip()
+    else:
+        paciente_valido = _nombres_coinciden(nombre_dni_completo, nombre_receta)
+
+    if not paciente_valido:
+        motivo = "El paciente de la receta no coincide con el DNI / CE"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 2: receta no mayor a 3 meses ──
+    fecha_receta_str = datos_receta.get("fecha_emision")
+    fecha_receta_parsed = None
+    receta_vigente = False
+    if fecha_receta_str:
+        try:
+            fecha_receta_parsed = datetime.strptime(fecha_receta_str, "%Y-%m-%d").date()
+            receta_vigente = fecha_receta_parsed >= (datetime.now() - timedelta(days=92)).date()
+        except ValueError:
+            receta_vigente = False
+
+    if not receta_vigente:
+        motivo = "La receta tiene una antigüedad mayor a tres meses o no se pudo leer la fecha"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 3: clasificar programa según diagnósticos ──
+    diagnosticos = datos_receta.get("diagnosticos", [])
+    programa_detectado, cie10_match, descripcion_match = determinar_programa_por_diagnosticos(diagnosticos, cur)
+
+    if not programa_detectado:
+        motivo = "Ninguno de los diagnósticos de la receta corresponde a un programa disponible"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 4: crónico complejo → manejo manual por correo ──
+    if programa_detectado == "cronico_complejo":
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'derivado_manual', programa = %s, cie10_detectado = %s, diagnostico_detectado = %s,
+                nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (programa_detectado, cie10_match, descripcion_match, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        conn.commit()
+
+        dni_anverso_bucket = blob.public_url if url_documento else blob_a.public_url
+        dni_reverso_bucket = None if url_documento else blob_r.public_url
+        receta_bucket = blob_receta.public_url
+
+        enviar_correo_cronico_complejo(
+        nombres=datos_dni.get("nombres"),
+        apellidos=datos_dni.get("apellidos"),
+        n_documento=n_documento,
+        celular=celular,
+        correo_paciente=correo,
+        programa=programa_detectado,
+        dni_anverso_url=dni_anverso_bucket,
+        dni_reverso_url=dni_reverso_bucket,
+        receta_url=receta_bucket,
+        )   
+
+        cur.close(); conn.close()
+        return (json.dumps({
+            "ok": True, "token": token, "estado": "derivado_manual",
+            "motivo_rechazo": "Tu caso requiere evaluación del equipo de Programa de Salud. Te contactarán pronto."
+        }), 200, HEADERS)
+
+    # ── Todo OK: listo para firmar ──
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET estado = 'dni_recibido', programa = %s, cie10_detectado = %s, diagnostico_detectado = %s,
+            nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+        WHERE id = %s
+    """, (programa_detectado, cie10_match, descripcion_match, nombre_receta, fecha_receta_parsed, inscripcion_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return (json.dumps({
+        "ok": True, "token": token, "estado": "dni_recibido", "programa": programa_detectado,
+        "link_firma": f"https://sntspe.com/programa-cronico/{token}"
+    }), 200, HEADERS)
+
+def _pagina_mensaje(titulo, mensaje):
+    return f"""<!DOCTYPE html>
+    <html lang="es">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{titulo}</title>
+    <link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+    <style>
+        body {{
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: #f7f9fa;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }}
+        .card {{
+            background: #fff;
+            border-radius: 12px;
+            padding: 40px 28px;
+            max-width: 420px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }}
+        img.logo {{ width: 120px; margin-bottom: 20px; }}
+        h2 {{ color: #0090A6; margin: 0 0 10px 0; }}
+        p {{ color: #444; font-size: 15px; line-height: 1.5; margin: 0; }}
+    </style>
+    </head>
+    <body>
+        <div class="card">
+            <img class="logo" src="/assets/logo_sanitasperu.png" alt="Sanitas">
+            <h2>{titulo}</h2>
+            <p>{mensaje}</p>
+        </div>
+    </body>
+    </html>"""
+
+# ──────────────────────────────────────────
+# API: Programas Firmar consentimiento 
+# ──────────────────────────────────────────
+@con_log_errores
+def handle_firmar_consentimiento_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token")
+    firma_carta_base64 = data.get("firma_carta_base64")
+    firma_ficha_base64 = data.get("firma_ficha_base64")
+    modalidad_atencion = data.get("modalidad_atencion")
+    ip_firma = request.headers.get("X-Forwarded-For", request.remote_addr)
+
+    # datos de la ficha que el paciente completa si no vinieron del DNI
+    domicilio_form = data.get("domicilio")
+    distrito_form = data.get("distrito")
+    provincia_form = data.get("provincia")
+    departamento_form = data.get("departamento")
+    nombre_titular = data.get("nombre_titular")
+    empleador = data.get("empleador")
+
+    # datos opcionales de cuidador (solo carta, si requiere_cuidador = TRUE)
+    firma_cuidador_base64 = data.get("firma_cuidador_base64")
+    nombre_cuidador = data.get("nombre_cuidador")
+    dni_cuidador = data.get("dni_cuidador")
+    parentesco_cuidador = data.get("parentesco_cuidador")
+
+    if not token or not firma_carta_base64 or not firma_ficha_base64:
+        return (json.dumps({"error": "token, firma_carta_base64 y firma_ficha_base64 son requeridos"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT n_documento, nombres, apellidos, fecha_nacimiento, programa,
+               requiere_cuidador, estado, celular, correo, domicilio, distrito,
+               provincia, departamento, tipo_documento, diagnostico_detectado,
+               dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Token no encontrado"}), 404, HEADERS)
+
+    (n_documento, nombres, apellidos, fecha_nacimiento, programa,
+     requiere_cuidador, estado, celular, correo, domicilio_bd, distrito_bd,
+     provincia_bd, departamento_bd, tipo_documento, diagnostico_detectado,
+     dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket) = row
+
+    if estado != "dni_recibido":
+        cur.close(); conn.close()
+        return (json.dumps({"error": "El DNI aún no ha sido validado"}), 400, HEADERS)
+
+    if requiere_cuidador and (not firma_cuidador_base64 or not dni_cuidador):
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Este caso requiere datos y firma del cuidador"}), 400, HEADERS)
+
+    # ── Priorizar lo extraído del DNI; si vino vacío, usar lo que completó el paciente ──
+    domicilio_final = domicilio_bd or domicilio_form
+    distrito_final = distrito_bd or distrito_form
+    provincia_final = provincia_bd or provincia_form
+    departamento_final = departamento_bd or departamento_form
+
+    if not domicilio_final or not distrito_final or not provincia_final or not departamento_final:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Falta domicilio o distrito o provincia o departamento"}), 400, HEADERS)
+
+    if programa == "krystal" and (not nombre_titular or not empleador):
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Falta nombre_titular o empleador"}), 400, HEADERS)
+
+    # ── Subir firmas a Cloud Storage ──
+    bucket = storage_client.bucket(BUCKET_NAME)
+
+    firma_carta_bytes = base64.b64decode(firma_carta_base64)
+    bucket.blob(f"programa-cronico/{token}/firma_carta.png").upload_from_string(firma_carta_bytes, content_type="image/png")
+
+    firma_ficha_bytes = base64.b64decode(firma_ficha_base64)
+    bucket.blob(f"programa-cronico/{token}/firma_ficha.png").upload_from_string(firma_ficha_bytes, content_type="image/png")
+
+    firma_cuidador_url = None
+    if firma_cuidador_base64:
+        firma_cuidador_bytes = base64.b64decode(firma_cuidador_base64)
+        blob_c = bucket.blob(f"programa-cronico/{token}/firma_cuidador.png")
+        blob_c.upload_from_string(firma_cuidador_bytes, content_type="image/png")
+        firma_cuidador_url = blob_c.public_url
+
+    fecha_hoy = datetime.now(LIMA_TZ).strftime("%d/%m/%Y")
+    fecha_firma_completa = datetime.now(LIMA_TZ).strftime("%d/%m/%Y %H:%M")
+
+     # ── Renderizar carta de compromiso ──
+    template_carta = jinja_env.get_template(f"consentimiento_{programa}.html")
+    html_carta = template_carta.render(
+        nombres=nombres, apellidos=apellidos, n_documento=n_documento,
+        tipo_documento=tipo_documento or "DNI",
+        fecha_nacimiento=fecha_nacimiento, modalidad_atencion=modalidad_atencion,
+        firma_afiliado_b64=firma_carta_base64,
+        requiere_cuidador=requiere_cuidador,
+        nombre_cuidador=nombre_cuidador, dni_cuidador=dni_cuidador,
+        parentesco_cuidador=parentesco_cuidador,
+        firma_cuidador_b64=firma_cuidador_base64,
+        fecha_firma=fecha_firma_completa,
+        ip_firma=ip_firma,
+        token=token,
+    )
+
+    # ── Renderizar carta de compromiso ──
+    html_carta = template_carta.render(
+        nombres=nombres, apellidos=apellidos, n_documento=n_documento,
+        tipo_documento=tipo_documento or "DNI",
+        fecha_nacimiento=fecha_nacimiento, modalidad_atencion=modalidad_atencion,
+        firma_afiliado_b64=firma_carta_base64,
+        requiere_cuidador=requiere_cuidador,
+        nombre_cuidador=nombre_cuidador, dni_cuidador=dni_cuidador,
+        parentesco_cuidador=parentesco_cuidador,
+        firma_cuidador_b64=firma_cuidador_base64,
+        fecha_firma=fecha_firma_completa,
+        ip_firma=ip_firma,
+        token=token,
+    )
+
+    # ── Renderizar ficha de inscripción ──
+    template_ficha = jinja_env.get_template(f"ficha_{programa}.html")
+    html_ficha = template_ficha.render(
+        nombres=nombres, apellidos=apellidos, n_documento=n_documento,
+        fecha_nacimiento=fecha_nacimiento, telefono=celular, correo=correo,
+        domicilio=domicilio_final, distrito=distrito_final, provincia=provincia_final,
+        departamento=departamento_final,
+        requiere_cuidador=requiere_cuidador,
+        nombre_titular=nombre_titular, empleador=empleador,
+        patologia_1=diagnostico_detectado, patologia_2="", patologia_3="",
+        patologia_4="", patologia_5="", patologia_6="",
+        firma_ficha_b64=firma_ficha_base64,
+        fecha_inscripcion=fecha_hoy, fecha_firma=fecha_firma_completa,
+        ip_firma=ip_firma,
+        token=token,
+    )
+
+    # ── Combinar ambos documentos en un solo PDF ──
+    estilos_combinados = _extraer_head_styles(html_carta) + "\n" + _extraer_head_styles(html_ficha)
+    body_carta = _extraer_body(html_carta)
+    body_ficha = _extraer_body(html_ficha)
+
+    html_combinado = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<style>
+{estilos_combinados}
+.salto-documento {{ page-break-before: always; }}
+</style>
+</head>
+<body>
+{body_carta}
+<div class="salto-documento"></div>
+{body_ficha}
+</body>
+</html>"""
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    pdf_bytes = HTML(string=html_combinado, base_url=f"file://{BASE_DIR}/").write_pdf()
+    hash_documento = hashlib.sha256(pdf_bytes).hexdigest()
+
+    blob_pdf = bucket.blob(f"programa-cronico/{token}/consentimiento_firmado.pdf")
+    blob_pdf.upload_from_string(pdf_bytes, content_type="application/pdf")
+    pdf_url = blob_pdf.public_url
+
+    # ── Notificar a Danaconnect (no debe bloquear el flujo si falla) ──
+    danaconnect_enviado = False
+    danaconnect_error_msg = None
+    try:
+        notificar_danaconnect(n_documento, nombres, apellidos, correo, programa, pdf_bytes,
+                                dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket)
+        danaconnect_enviado = True
+    except Exception as e:
+        danaconnect_error_msg = str(e)
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET estado = 'firmado', pdf_consentimiento_url = %s, hash_documento = %s,
+            ip_firma = %s, firmado_at = NOW(), modalidad_atencion = %s,
+            nombre_cuidador = %s, dni_cuidador = %s, parentesco_cuidador = %s,
+            firma_cuidador_url = %s, firma_ficha_url = %s,
+            domicilio = %s, distrito = %s, provincia = %s, departamento = %s,
+            nombre_titular = %s, empleador = %s,
+            danaconnect_enviado = %s, danaconnect_error = %s,
+            actualizado_at = NOW()
+        WHERE token = %s
+    """, (pdf_url, hash_documento, ip_firma, modalidad_atencion,
+          nombre_cuidador, dni_cuidador, parentesco_cuidador,
+          firma_cuidador_url, f"programa-cronico/{token}/firma_ficha.png",
+          domicilio_final, distrito_final, provincia_final, departamento_final,
+          nombre_titular, empleador,
+          danaconnect_enviado, danaconnect_error_msg, token))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return (json.dumps({"ok": True, "pdf_url": pdf_url, "hash_documento": hash_documento}), 200, HEADERS)
+
+# ─────────────────────
+# API: /programa-cronico/{token} (GET - sirve el formulario web)
+# ─────────────────────
+def handle_ver_formulario_cronico(request, token):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT nombres, apellidos, n_documento, programa, estado, requiere_cuidador,
+               fecha_nacimiento, celular, correo, domicilio, distrito, provincia, departamento,
+               diagnostico_detectado
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return (_pagina_mensaje("Enlace no válido", "Este enlace expiró o no es correcto. Contáctanos por WhatsApp si necesitas ayuda."), 404, {"Content-Type": "text/html; charset=utf-8"})
+
+    (nombres, apellidos, n_documento, programa, estado, requiere_cuidador,
+     fecha_nacimiento, celular, correo, domicilio, distrito, provincia, departamento,
+     diagnostico_detectado) = row
+
+    if estado == "firmado":
+        return (_pagina_mensaje("¡Ya completaste tu inscripción!", "Revisa tu correo para ver tus constancias."), 200, {"Content-Type": "text/html; charset=utf-8"})
+
+    if estado != "dni_recibido":
+        return (_pagina_mensaje("Aún estamos validando tu documento", "Te escribiremos por WhatsApp en cuanto puedas firmar."), 200, {"Content-Type": "text/html; charset=utf-8"})
+
+    if programa not in ("vive_sano_completo", "krystal"):
+        return (_pagina_mensaje("Programa no reconocido", "Contáctanos por WhatsApp para ayudarte."), 400, {"Content-Type": "text/html; charset=utf-8"})
+
+    template = jinja_env.get_template(f"formulario_firma_{programa}.html")
+    html_renderizado = template.render(
+        token=token, nombres=nombres, apellidos=apellidos, n_documento=n_documento,
+        requiere_cuidador=requiere_cuidador, fecha_nacimiento=fecha_nacimiento,
+        celular=celular, correo=correo or "", domicilio=domicilio or "",
+        distrito=distrito or "", provincia=provincia or "", departamento=departamento or "",
+        diagnostico_detectado=diagnostico_detectado or "",
+    )
+    return (html_renderizado, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+# ──────────────────────────────────
+# API: /Reenvio manual de correos
+# ──────────────────────────────────
+@con_log_errores
+def handle_reenviar_danaconnect(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token")
+
+    if not token:
+        return (json.dumps({"error": "token es requerido"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT n_documento, nombres, apellidos, correo, programa, estado,
+               pdf_consentimiento_url, danaconnect_enviado,
+               dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Token no encontrado"}), 404, HEADERS)
+
+    (n_documento, nombres, apellidos, correo, programa, estado,
+     pdf_consentimiento_url, danaconnect_enviado,
+     dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket) = row
+
+    if estado != "firmado":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"Esta inscripción no está firmada (estado actual: {estado})"}), 400, HEADERS)
+
+    if not pdf_consentimiento_url:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "No hay PDF de consentimiento generado para esta inscripción"}), 400, HEADERS)
+
+    # ── Descargar el PDF ya generado desde el bucket ──
+    try:
+        #resp_pdf = requests.get(pdf_consentimiento_url, timeout=20)
+        #resp_pdf.raise_for_status()
+        #pdf_bytes = resp_pdf.content
+        pdf_bytes = descargar_blob_desde_url(pdf_consentimiento_url)
+    except Exception as e:
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"No se pudo descargar el PDF: {str(e)}"}), 500, HEADERS)
+
+    # ── Reintentar el envío a Danaconnect ──
+    danaconnect_enviado_nuevo = False
+    danaconnect_error_msg = None
+    try:
+        notificar_danaconnect(n_documento, nombres, apellidos, correo, programa, pdf_bytes,
+                                dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket)
+        danaconnect_enviado_nuevo = True
+    except Exception as e:
+        danaconnect_error_msg = str(e)
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET danaconnect_enviado = %s, danaconnect_error = %s, actualizado_at = NOW()
+        WHERE token = %s
+    """, (danaconnect_enviado_nuevo, danaconnect_error_msg, token))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if danaconnect_enviado_nuevo:
+        return (json.dumps({"ok": True, "token": token, "danaconnect_enviado": True}), 200, HEADERS)
+    else:
+        return (json.dumps({"ok": False, "token": token, "danaconnect_enviado": False, "error": danaconnect_error_msg}), 502, HEADERS)
+
+ADMIN_PW_CRONICO = os.environ.get("ADMIN_PW_CRONICO")
+
+# ─────────────────────
+# API: /programa-cronico/reporte
+def handle_reporte_cronico(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CRONICO:
+        return "No autorizado", 401
+
+    filtro_estado = request.args.get("estado", "")
+    filtro_programa = request.args.get("programa", "")
+    filtro_busqueda = request.args.get("q", "").strip()
+
+    conn = get_connection()
+    with conn.cursor() as cur:
+        query = """
+            SELECT token, n_documento, nombres, apellidos, celular, correo,
+                   programa, estado, motivo_rechazo, diagnostico_detectado, cie10_detectado,
+                   dni_foto_anverso_url, dni_foto_reverso_url, url_receta,
+                   pdf_consentimiento_url, danaconnect_enviado, danaconnect_error,
+                   creado_at, firmado_at
+            FROM sofi_programa_cronico_inscripciones
+            WHERE 1=1
+        """
+        params = []
+
+        if filtro_estado:
+            query += " AND estado = %s"
+            params.append(filtro_estado)
+
+        if filtro_programa:
+            query += " AND programa = %s"
+            params.append(filtro_programa)
+
+        if filtro_busqueda:
+            query += " AND (n_documento ILIKE %s OR nombres ILIKE %s OR apellidos ILIKE %s OR celular ILIKE %s)"
+            comodin = f"%{filtro_busqueda}%"
+            params.extend([comodin, comodin, comodin, comodin])
+
+        query += " ORDER BY creado_at DESC LIMIT 500"
+        cur.execute(query, params)
+        registros = cur.fetchall()
+    conn.close()
+
+    COLOR_ESTADO = {
+        "firmado": "#2e7d32",
+        "rechazado": "#c62828",
+        "derivado_manual": "#ef6c00",
+        "dni_recibido": "#0090A6",
+        "esperando_dni": "#888",
+    }
+
+    filas_html = ""
+    for row in registros:
+        (token, n_documento, nombres, apellidos, celular, correo,
+         programa, estado, motivo_rechazo, diagnostico_detectado, cie10_detectado,
+         dni_anverso_url, dni_reverso_url, url_receta,
+         pdf_url, dana_enviado, dana_error,
+         creado_at, firmado_at) = row
+
+        color_estado = COLOR_ESTADO.get(estado, "#555")
+        nombre_completo = f"{nombres or ''} {apellidos or ''}".strip() or "—"
+
+        links = []
+        if dni_anverso_url:
+            links.append(f'<a href="{dni_anverso_url}" target="_blank">DNI</a>')
+        if dni_reverso_url:
+            links.append(f'<a href="{dni_reverso_url}" target="_blank">DNI reverso</a>')
+        if url_receta:
+            links.append(f'<a href="{url_receta}" target="_blank">Receta orig.</a>')
+        if pdf_url:
+            links.append(f'<a href="{pdf_url}" target="_blank"><strong>PDF firmado</strong></a>')
+        links_html = " · ".join(links) if links else "—"
+
+        dana_badge = ""
+        if estado == "firmado":
+            if dana_enviado:
+                dana_badge = '<span style="color:#2e7d32;">✓ Dana</span>'
+            else:
+                error_txt = (dana_error or "sin enviar")[:60]
+                dana_badge = f'<span style="color:#c62828;" title="{dana_error or ""}">✗ Dana ({error_txt})</span>'
+
+        motivo_html = f'<div style="font-size:12px;color:#c62828;">{motivo_rechazo}</div>' if motivo_rechazo else ""
+        diagnostico_html = f"{diagnostico_detectado or ''} ({cie10_detectado or ''})" if diagnostico_detectado else "—"
+
+        filas_html += f"""
+        <tr>
+            <td>{creado_at.strftime('%d/%m/%Y %H:%M') if creado_at else '—'}</td>
+            <td>{nombre_completo}<br><span style="font-size:12px;color:#888;">{n_documento or ''}</span></td>
+            <td>{celular or '—'}<br><span style="font-size:12px;color:#888;">{correo or ''}</span></td>
+            <td>{programa or '—'}</td>
+            <td>{diagnostico_html}</td>
+            <td><span style="color:{color_estado};font-weight:600;">{estado}</span>{motivo_html}</td>
+            <td>{links_html}</td>
+            <td>{dana_badge}</td>
+            <td><span style="font-size:11px;color:#aaa;">{token}</span></td>
+        </tr>"""
+
+    opciones_estado = ["", "esperando_dni", "dni_recibido", "rechazado", "derivado_manual", "firmado"]
+    opciones_estado_html = "".join(
+        f'<option value="{e}" {"selected" if e == filtro_estado else ""}>{e or "Todos"}</option>'
+        for e in opciones_estado
+    )
+
+    opciones_programa = ["", "vive_sano_completo", "krystal", "cronico_complejo"]
+    opciones_programa_html = "".join(
+        f'<option value="{p}" {"selected" if p == filtro_programa else ""}>{p or "Todos"}</option>'
+        for p in opciones_programa
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Reporte Programa Crónico</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 20px; color: #222; }}
+    h1 {{ color: #0090A6; font-size: 20px; margin-bottom: 4px; }}
+    .subtitulo {{ color: #888; font-size: 13px; margin-bottom: 20px; }}
+    .filtros {{ background: #fff; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; display: flex; gap: 12px; align-items: end; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    .filtros label {{ font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px; }}
+    .filtros input, .filtros select {{ padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }}
+    .filtros button {{ padding: 8px 16px; background: #0090A6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    th {{ background: #0090A6; color: #fff; text-align: left; padding: 10px 12px; font-size: 12px; }}
+    td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #eee; vertical-align: top; }}
+    tr:hover {{ background: #f0f7f8; }}
+    .contador {{ font-size: 12px; color: #888; margin-bottom: 10px; }}
+    a {{ color: #0090A6; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+
+<h1>Reporte — Programa de Pacientes Crónicos</h1>
+<div class="subtitulo">Vive Sano · Krystal · Crónico Complejo</div>
+
+<form class="filtros" method="GET" action="/programa-cronico/reporte">
+    <input type="hidden" name="pw" value="{pw}">
+    <div>
+        <label>Buscar (DNI, nombre, celular)</label>
+        <input type="text" name="q" value="{filtro_busqueda}" placeholder="Ej. 47313070">
+    </div>
+    <div>
+        <label>Estado</label>
+        <select name="estado">{opciones_estado_html}</select>
+    </div>
+    <div>
+        <label>Programa</label>
+        <select name="programa">{opciones_programa_html}</select>
+    </div>
+    <button type="submit">Filtrar</button>
+</form>
+
+<div class="contador">{len(registros)} registro(s) (máx. 500)</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Fecha</th>
+            <th>Paciente</th>
+            <th>Contacto</th>
+            <th>Programa</th>
+            <th>Diagnóstico (CIE-10)</th>
+            <th>Estado</th>
+            <th>Archivos</th>
+            <th>Danaconnect</th>
+            <th>Token</th>
+        </tr>
+    </thead>
+    <tbody>
+        {filas_html}
+    </tbody>
+</table>
+
+</body>
+</html>"""
+
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+# ──────────────────────────────────────────
+# Lógica compartida: actualizar celular/correo
+# (usada tanto por el endpoint API como por el formulario web)
+# ──────────────────────────────────────────
+def _actualizar_contacto(token, celular_nuevo, correo_nuevo, reenviar_si_firmado=True):
+    celular_nuevo = (celular_nuevo or "").strip() or None
+    correo_nuevo = (correo_nuevo or "").strip() or None
+
+    if not token:
+        return {"ok": False, "error": "token es requerido"}
+    if not celular_nuevo and not correo_nuevo:
+        return {"ok": False, "error": "Debes enviar celular_nuevo y/o correo_nuevo"}
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, celular, correo, estado
+        FROM sofi_programa_cronico_inscripciones
+        WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return {"ok": False, "error": "Token no encontrado"}
+
+    inscripcion_id, celular_actual, correo_actual, estado = row
+
+    if celular_nuevo and celular_nuevo != celular_actual:
+        cur.execute("""
+            SELECT token FROM sofi_programa_cronico_inscripciones
+            WHERE celular = %s AND id != %s
+        """, (celular_nuevo, inscripcion_id))
+        conflicto = cur.fetchone()
+        if conflicto:
+            cur.close(); conn.close()
+            return {"ok": False, "error": f"Ese celular ya está en uso por otra inscripción (token: {conflicto[0]})"}
+
+    campos = []
+    valores = []
+
+    if celular_nuevo and celular_nuevo != celular_actual:
+        campos.append("celular = %s")
+        valores.append(celular_nuevo)
+
+    if correo_nuevo and correo_nuevo != correo_actual:
+        campos.append("correo = %s")
+        valores.append(correo_nuevo)
+
+    if not campos:
+        cur.close(); conn.close()
+        return {"ok": True, "mensaje": "No hubo cambios (valores idénticos a los actuales)"}
+
+    campos.append("actualizado_at = NOW()")
+    valores.append(inscripcion_id)
+
+    cur.execute(f"""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET {", ".join(campos)}
+        WHERE id = %s
+    """, valores)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    resultado = {
+        "ok": True,
+        "token": token,
+        "celular_anterior": celular_actual,
+        "celular_actual": celular_nuevo or celular_actual,
+        "correo_anterior": correo_actual,
+        "correo_actual": correo_nuevo or correo_actual,
+    }
+
+    if reenviar_si_firmado and correo_nuevo and correo_nuevo != correo_actual and estado == "firmado":
+        try:
+            resultado["reenvio_danaconnect"] = _reenviar_danaconnect_por_token(token)
+        except Exception as e:
+            resultado["reenvio_danaconnect"] = {"ok": False, "error": str(e)}
+
+    return resultado
+
+
+def _reenviar_danaconnect_por_token(token):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT n_documento, nombres, apellidos, correo, programa, estado,
+               pdf_consentimiento_url, danaconnect_enviado,
+               dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return {"ok": False, "error": "Token no encontrado"}
+
+    (n_documento, nombres, apellidos, correo, programa, estado,
+     pdf_consentimiento_url, danaconnect_enviado,
+     dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket) = row
+
+    if estado != "firmado" or not pdf_consentimiento_url:
+        cur.close(); conn.close()
+        return {"ok": False, "error": f"Inscripción no está firmada o sin PDF (estado: {estado})"}
+
+    try:
+        pdf_bytes = descargar_blob_desde_url(pdf_consentimiento_url)
+    except Exception as e:
+        cur.close(); conn.close()
+        return {"ok": False, "error": f"No se pudo descargar el PDF: {str(e)}"}
+
+    danaconnect_enviado_nuevo = False
+    danaconnect_error_msg = None
+    try:
+        notificar_danaconnect(n_documento, nombres, apellidos, correo, programa, pdf_bytes,
+                                dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket)
+        danaconnect_enviado_nuevo = True
+    except Exception as e:
+        danaconnect_error_msg = str(e)
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET danaconnect_enviado = %s, danaconnect_error = %s, actualizado_at = NOW()
+        WHERE token = %s
+    """, (danaconnect_enviado_nuevo, danaconnect_error_msg, token))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"ok": danaconnect_enviado_nuevo, "error": danaconnect_error_msg}
+
+
+# ──────────────────────────────────────────
+# API: mantiene compatibilidad si alguna vez quieres
+# llamarlo por API/integración además del formulario web
+# ──────────────────────────────────────────
+@con_log_errores
+def handle_actualizar_contacto_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+
+    if data.get("pw") != ADMIN_PW_CRONICO:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
+    resultado = _actualizar_contacto(
+        token=data.get("token"),
+        celular_nuevo=data.get("celular_nuevo"),
+        correo_nuevo=data.get("correo_nuevo"),
+        reenviar_si_firmado=data.get("reenviar_si_firmado", True),
+    )
+    status = 200 if resultado.get("ok") else 400
+    return (json.dumps(resultado), status, HEADERS)
+
+
+# ──────────────────────────────────────────
+# WEB: página de mantenimiento amigable
+# GET  /programa-cronico/mantenimiento?pw=...            -> buscador
+# GET  /programa-cronico/mantenimiento?pw=...&q=...       -> resultados de búsqueda
+# GET  /programa-cronico/mantenimiento?pw=...&token=...   -> formulario de edición de 1 registro
+# POST /programa-cronico/mantenimiento (form-urlencoded)  -> guarda cambios
+# ──────────────────────────────────────────
+def _layout_mantenimiento(pw, contenido, mensaje_html=""):
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Mantenimiento de contacto — Programa Crónico</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 24px; color: #222; }}
+    .contenedor {{ max-width: 640px; margin: 0 auto; }}
+    h1 {{ color: #0090A6; font-size: 20px; margin-bottom: 4px; }}
+    .subtitulo {{ color: #888; font-size: 13px; margin-bottom: 20px; }}
+    .card {{ background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }}
+    label {{ font-size: 12px; font-weight: 600; display: block; margin: 12px 0 4px; }}
+    input[type=text], input[type=email], input[type=tel] {{
+        width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #ccc;
+        border-radius: 6px; font-size: 14px;
+    }}
+    button {{
+        margin-top: 16px; padding: 10px 18px; background: #0090A6; color: #fff; border: none;
+        border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;
+    }}
+    button:hover {{ background: #007686; }}
+    a.volver {{ display: inline-block; margin-bottom: 14px; color: #0090A6; font-size: 13px; text-decoration: none; }}
+    a.volver:hover {{ text-decoration: underline; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }}
+    th {{ background: #0090A6; color: #fff; text-align: left; padding: 9px 10px; font-size: 12px; }}
+    td {{ padding: 9px 10px; font-size: 13px; border-bottom: 1px solid #eee; }}
+    tr:hover {{ background: #f0f7f8; }}
+    .msg-ok {{ background: #e6f5ea; color: #2e7d32; padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }}
+    .msg-error {{ background: #fdecea; color: #c62828; padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }}
+    .campo-actual {{ font-size: 12px; color: #888; margin-top: 2px; }}
+</style>
+</head>
+<body>
+<div class="contenedor">
+    <h1>Mantenimiento de contacto</h1>
+    <div class="subtitulo">Programa de Pacientes Crónicos — corregir celular / correo</div>
+    {mensaje_html}
+    {contenido}
+</div>
+</body>
+</html>"""
+
+
+def _form_busqueda(pw, q=""):
+    return f"""
+    <div class="card">
+        <form method="GET" action="/programa-cronico/mantenimiento">
+            <input type="hidden" name="pw" value="{pw}">
+            <label>Buscar por DNI, nombre, celular o token</label>
+            <input type="text" name="q" value="{q}" placeholder="Ej. 47313070 o Juan Pérez" autofocus>
+            <button type="submit">Buscar</button>
+        </form>
+    </div>
+    """
+
+
+def _tabla_resultados(pw, registros):
+    if not registros:
+        return '<div class="card">No se encontraron inscripciones con ese criterio.</div>'
+
+    filas = ""
+    for token, n_documento, nombres, apellidos, celular, correo, programa, estado in registros:
+        nombre_completo = f"{nombres or ''} {apellidos or ''}".strip() or "—"
+        filas += f"""
+        <tr>
+            <td>{nombre_completo}<br><span class="campo-actual">{n_documento or ''}</span></td>
+            <td>{celular or '—'}<br><span class="campo-actual">{correo or ''}</span></td>
+            <td>{programa or '—'}</td>
+            <td>{estado or '—'}</td>
+            <td><a href="/programa-cronico/mantenimiento?pw={pw}&token={token}">Editar</a></td>
+        </tr>"""
+
+    return f"""
+    <div class="card" style="padding:0; overflow:hidden;">
+        <table>
+            <thead>
+                <tr><th>Paciente</th><th>Contacto</th><th>Programa</th><th>Estado</th><th></th></tr>
+            </thead>
+            <tbody>{filas}</tbody>
+        </table>
+    </div>
+    """
+
+
+def _form_edicion(pw, token, row):
+    (n_documento, nombres, apellidos, celular, correo, programa, estado) = row
+    nombre_completo = f"{nombres or ''} {apellidos or ''}".strip() or "—"
+
+    aviso_reenvio = ""
+    if estado == "firmado":
+        aviso_reenvio = '<div class="campo-actual" style="margin-top:10px;">Si corriges el correo, se reenviará automáticamente el consentimiento firmado.</div>'
+
+    return f"""
+    <a class="volver" href="/programa-cronico/mantenimiento?pw={pw}">&larr; Volver a la búsqueda</a>
+    <div class="card">
+        <div style="font-size:14px; font-weight:600;">{nombre_completo}</div>
+        <div class="campo-actual">DNI: {n_documento or '—'} · Programa: {programa or '—'} · Estado: {estado or '—'}</div>
+
+        <form method="POST" action="/programa-cronico/mantenimiento">
+            <input type="hidden" name="pw" value="{pw}">
+            <input type="hidden" name="token" value="{token}">
+
+            <label>Celular</label>
+            <input type="tel" name="celular_nuevo" value="{celular or ''}">
+
+            <label>Correo</label>
+            <input type="email" name="correo_nuevo" value="{correo or ''}">
+
+            {aviso_reenvio}
+            <button type="submit">Guardar cambios</button>
+        </form>
+    </div>
+    """
+
+
+def handle_mantenimiento_contacto_cronico(request):
+    pw = request.args.get("pw") or request.form.get("pw")
+    if pw != ADMIN_PW_CRONICO:
+        return ("No autorizado", 401, {"Content-Type": "text/html; charset=utf-8"})
+
+    HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
+
+    # ── POST: guardar cambios ──
+    if request.method == "POST":
+        token = request.form.get("token")
+        celular_nuevo = request.form.get("celular_nuevo")
+        correo_nuevo = request.form.get("correo_nuevo")
+
+        resultado = _actualizar_contacto(token, celular_nuevo, correo_nuevo)
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT n_documento, nombres, apellidos, celular, correo, programa, estado
+            FROM sofi_programa_cronico_inscripciones WHERE token = %s
+        """, (token,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if not row:
+            return (_layout_mantenimiento(pw, _form_busqueda(pw), '<div class="msg-error">Token no encontrado.</div>'), 404, HTML_HEADERS)
+
+        if resultado.get("ok"):
+            texto_reenvio = ""
+            if resultado.get("reenvio_danaconnect"):
+                texto_reenvio = " Se reenvió a Danaconnect." if resultado["reenvio_danaconnect"].get("ok") else " (No se pudo reenviar a Danaconnect, revisa el reporte)."
+            mensaje = f'<div class="msg-ok">Datos actualizados correctamente.{texto_reenvio}</div>'
+        else:
+            mensaje = f'<div class="msg-error">{resultado.get("error")}</div>'
+
+        return (_layout_mantenimiento(pw, _form_edicion(pw, token, row), mensaje), 200, HTML_HEADERS)
+
+    # ── GET con token: mostrar formulario de edición de un registro puntual ──
+    token = request.args.get("token")
+    if token:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT n_documento, nombres, apellidos, celular, correo, programa, estado
+            FROM sofi_programa_cronico_inscripciones WHERE token = %s
+        """, (token,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if not row:
+            return (_layout_mantenimiento(pw, _form_busqueda(pw), '<div class="msg-error">Token no encontrado.</div>'), 404, HTML_HEADERS)
+
+        return (_layout_mantenimiento(pw, _form_edicion(pw, token, row)), 200, HTML_HEADERS)
+
+    # ── GET con q: mostrar resultados de búsqueda ──
+    q = request.args.get("q", "").strip()
+    if q:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT token, n_documento, nombres, apellidos, celular, correo, programa, estado
+            FROM sofi_programa_cronico_inscripciones
+            WHERE n_documento ILIKE %s OR nombres ILIKE %s OR apellidos ILIKE %s
+               OR celular ILIKE %s OR token ILIKE %s
+            ORDER BY creado_at DESC LIMIT 50
+        """, tuple([f"%{q}%"] * 4 + [f"{q}%"]))
+        registros = cur.fetchall()
+        cur.close(); conn.close()
+
+        contenido = _form_busqueda(pw, q) + _tabla_resultados(pw, registros)
+        return (_layout_mantenimiento(pw, contenido), 200, HTML_HEADERS)
+
+    # ── GET sin nada: solo el buscador ──
+    return (_layout_mantenimiento(pw, _form_busqueda(pw)), 200, HTML_HEADERS)
+
+# ────────────────────────────────────────────────────────────────────────────────────
+# API: Afiliacion a titulares y dependientes con imagen de su documento de identidad
+# ────────────────────────────────────────────────────────────────────────────────────
+
+def handle_consulta_ruc_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    ruc = data.get("ruc", "").strip()
+    if not ruc:
+        return (json.dumps({"error": "El campo ruc es obligatorio"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT razon_social, direccion, departamento, provincia, distrito FROM sctr_empresa WHERE ruc = %s", (ruc,))
+    row = cur.fetchone()
+
+    if row:
+        razon_social, direccion, departamento, provincia, distrito = row
+    else:
+        resp = requests.get(f"https://dniruc.apisperu.com/api/v1/ruc/{ruc}?token={APISPERU_TOKEN}", timeout=10)
+        obj = resp.json()
+        razon_social = obj.get("razonSocial", "")
+        direccion    = obj.get("direccion", "")
+        distrito     = obj.get("distrito", "")
+        provincia    = obj.get("provincia", "")
+        departamento = obj.get("departamento", "")
+        if razon_social:
+            cur.execute("""
+                INSERT INTO sctr_empresa (ruc, razon_social, direccion, departamento, provincia, distrito, fecha_creacion, fecha_ult_acceso)
+                VALUES (%s, %s, %s, %s, %s, %s, now(), now())
+                ON CONFLICT (ruc) DO NOTHING
+            """, (ruc, razon_social, direccion, departamento, provincia, distrito))
+            conn.commit()
+
+    cur.close(); conn.close()
+    return (json.dumps({
+        "ruc": ruc, "razon_social": razon_social, "direccion": direccion,
+        "departamento": departamento, "provincia": provincia, "distrito": distrito
+    }, ensure_ascii=False), 200, HEADERS)

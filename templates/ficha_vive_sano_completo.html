@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Ficha de Inscripción - Programa Vive Sano</title>
+<style>
+    @page {
+        size: A4;
+        margin: 2.2cm 2cm;
+        @bottom-center {
+            content: "Página " counter(page) " de " counter(pages);
+            font-size: 8pt;
+            color: #888;
+        }
+    }
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.5;
+        color: #222;
+    }
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    .logo { width: 130px; height: auto; }
+    h1 {
+        font-size: 15pt;
+        color: #1a3c6e;
+        text-align: right;
+        margin: 0;
+        line-height: 1.3;
+    }
+    .datos-grid {
+        border-top: 2px solid #1a3c6e;
+        border-bottom: 2px solid #1a3c6e;
+        padding: 14px 0;
+        margin-bottom: 20px;
+    }
+    .fila { display: flex; margin-bottom: 6px; }
+    .campo { flex: 1; }
+    .campo-label { font-weight: 600; }
+    .campo-valor {
+        border-bottom: 1px dotted #555;
+        display: inline-block;
+        min-width: 60%;
+        padding: 0 4px;
+    }
+    p { text-align: justify; margin: 0 0 12px 0; }
+    .patologias {
+        margin-top: 20px;
+    }
+    .patologias-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 30px;
+    }
+    .patologia-item {
+        width: 45%;
+        border-bottom: 1px dotted #555;
+        padding-bottom: 2px;
+    }
+    .firma-bloque {
+        margin-top: 50px;
+        text-align: center;
+    }
+    .firma-imagen {
+        max-width: 220px;
+        max-height: 80px;
+        display: block;
+        margin: 0 auto 4px auto;
+    }
+    .firma-linea {
+        border-top: 1px solid #333;
+        width: 260px;
+        margin: 0 auto;
+        padding-top: 4px;
+        font-size: 9.5pt;
+    }
+    .metadata {
+        margin-top: 50px;
+        font-size: 7.5pt;
+        color: #999;
+        border-top: 1px solid #eee;
+        padding-top: 8px;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <img class="logo" src="assets/logo_sanitasperu.png" alt="Sanitas">
+    <h1>FICHA DE INSCRIPCIÓN<br>PROGRAMA VIVE SANO</h1>
+</div>
+
+<div class="datos-grid">
+    <div class="fila">
+        <div class="campo"><span class="campo-label">Fecha de inscripción:</span> <span class="campo-valor">{{ fecha_inscripcion }}</span></div>
+    </div>
+    <div class="fila">
+        <div class="campo"><span class="campo-label">Nombre:</span> <span class="campo-valor">{{ nombres }} {{ apellidos }}</span></div>
+    </div>
+    <div class="fila">
+        <div class="campo"><span class="campo-label">Fecha de nacimiento:</span> <span class="campo-valor">{{ fecha_nacimiento }}</span></div>
+    </div>
+    <div class="fila">
+        <div class="campo" style="flex:1.2;"><span class="campo-label">N° de DNI/CE/Pasaporte:</span> <span class="campo-valor">{{ n_documento }}</span></div>
+        <div class="campo"><span class="campo-label">Teléfono(s):</span> <span class="campo-valor">{{ telefono }}</span></div>
+    </div>
+    <div class="fila">
+        <div class="campo"><span class="campo-label">Domicilio:</span> <span class="campo-valor">{{ domicilio }}</span></div>
+    </div>
+	
+	<div class="fila">
+		<div class="campo"><span class="campo-label">Distrito:</span> <span class="campo-valor">{{ distrito }} / {{ provincia }} / {{ departamento }}</span></div>
+	</div>
+	
+    <div class="fila">
+        <div class="campo"><span class="campo-label">Correo electrónico:</span> <span class="campo-valor">{{ correo }}</span></div>
+    </div>
+</div>
+
+<p>Estimado(a) afiliado(a):</p>
+
+<p>
+    Mediante la presente nos es grato invitarlo(a) a participar en el Programa de Control y Seguimiento de
+    Enfermedades Crónicas que Sanitas Perú S.A EPS le ofrece para un mejor seguimiento de sus problemas de
+    salud.
+</p>
+
+<p>
+    Le ofrecemos brindarle el tratamiento médico más adecuado basado en la evidencia científica actualizada
+    de mayor contundencia, con los especialistas que Sanitas EPS le ofrece, bajo las condiciones del Programa
+    y según las especificaciones de su plan de salud, para las siguientes patologías:
+</p>
+
+<div class="patologias">
+    <div class="patologias-grid">
+        <div class="patologia-item">1. {{ patologia_1 }}</div>
+        <div class="patologia-item">2. {{ patologia_2 }}</div>
+        <div class="patologia-item">3. {{ patologia_3 }}</div>
+        <div class="patologia-item">4. {{ patologia_4 }}</div>
+    </div>
+</div>
+
+<div class="firma-bloque">
+    <img class="firma-imagen" src="data:image/png;base64,{{ firma_ficha_b64 }}" alt="Firma del afiliado">
+    <div class="firma-linea">Firma del afiliado(a)</div>
+</div>
+
+<div class="metadata">
+    Documento generado digitalmente vía WhatsApp el {{ fecha_firma }} (hora Perú) · Token: {{ token }} ·
+    IP de firma: {{ ip_firma }} · Hash SHA-256 disponible en el sistema de registro.
+</div>
+
+</body>
+</html>

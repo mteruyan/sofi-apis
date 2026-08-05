@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Carta de Compromiso - Programa Vive Sano</title>
+<style>
+    @page {
+        size: A4;
+        margin: 2.2cm 2cm;
+        @bottom-center {
+            content: "Página " counter(page) " de " counter(pages);
+            font-size: 8pt;
+            color: #888;
+        }
+    }
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.5;
+        color: #222;
+    }
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 2px solid #0090A6;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+    }
+    .logo {
+		width: 140px;
+		height: auto;
+	}
+    h1 {
+        font-size: 13pt;
+        color: #0090A6;
+        text-align: right;
+        margin: 0;
+        line-height: 1.3;
+    }
+    p {
+        text-align: justify;
+        margin: 0 0 12px 0;
+    }
+    .campo-linea {
+        border-bottom: 1px dotted #555;
+        padding: 0 4px;
+        font-weight: 600;
+    }
+    .checkbox {
+        font-family: monospace;
+        font-size: 11pt;
+    }
+    .modalidad {
+        margin-top: 20px;
+    }
+    .firma-bloque {
+        margin-top: 40px;
+        text-align: center;
+    }
+    .firma-imagen {
+        max-width: 220px;
+        max-height: 80px;
+        display: block;
+        margin: 0 auto 4px auto;
+    }
+    .firma-linea {
+        border-top: 1px solid #333;
+        width: 260px;
+        margin: 0 auto;
+        padding-top: 4px;
+        font-size: 9.5pt;
+    }
+    .metadata {
+        margin-top: 50px;
+        font-size: 7.5pt;
+        color: #999;
+        border-top: 1px solid #eee;
+        padding-top: 8px;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <img class="logo" src="assets/logo_sanitasperu.png" alt="Sanitas">
+    <h1>CARTA DE COMPROMISO<br>PROGRAMA KRYSTAL</h1>
+</div>
+
+<p>
+    Yo, <span class="campo-linea">{{ nombres }} {{ apellidos }}</span>,
+    identificado(a) con
+    DNI(<span class="checkbox">{{ "X" if tipo_documento == "DNI" else " " }}</span>)
+    CE(<span class="checkbox">{{ "X" if tipo_documento == "CE" else " " }}</span>)
+    Pasaporte(<span class="checkbox">{{ "X" if tipo_documento == "Pasaporte" else " " }}</span>)
+    N° <span class="campo-linea">{{ n_documento }}</span>,
+    acepto inscribirme voluntariamente en el "Programa Vive Sano", que Sanitas me ofrece de acuerdo a lo
+    establecido en mi plan de salud.
+</p>
+
+<p>
+    Me comprometo a seguir las indicaciones que mi médico tratante y los profesionales del equipo de salud del
+    Programa Vive Sano me ofrezcan dentro del desarrollo del programa, y cumplir con el tratamiento
+    farmacológico y no farmacológico recetado.
+</p>
+
+<p>
+    Asumo el compromiso de acudir a las actividades educativas que realice el programa y alcanzar el peso
+    recomendado por los especialistas, siguiendo las pautas que me brinden para adoptar hábitos saludables.
+</p>
+
+<p>
+    Me comprometo a no efectuar consultas ambulatorias en forma paralela por el(los) mismo(s) diagnóstico(s)
+    incluido(s) en el presente documento, ya sea en otro centro o con otro médico que no forme parte del equipo
+    de médicos del programa.
+</p>
+
+<p>
+    Declaro conocer que el Programa Vive Sano no contempla la atención ambulatoria de las eventuales
+    complicaciones de mi enfermedad. Toda situación de emergencia o urgencia médica, así como necesidad de
+    transferencia u hospitalización derivadas de estas complicaciones, serán atendidas bajo las condiciones
+    regulares indicadas en mi plan de salud.
+</p>
+
+<p>
+    Se me ha explicado claramente que si mi enfermedad estuviera bien controlada desde el ingreso al programa,
+    recibiré atenciones cada dos (02) o tres (03) meses —según el diagnóstico que padezca—, y si no fuera así,
+    seré atendido mensualmente. Una vez que mi enfermedad se encuentre controlada —y de acuerdo a criterio
+    médico— mi evaluación se realizará cada dos (02) o tres (03) meses, sin que se vea afectada la frecuencia
+    del seguimiento telefónico mensual hecho por una enfermera dentro del Programa, ni la entrega de mis
+    medicamentos.
+</p>
+
+<p>
+    Declaro conocer que en caso de evidencia de un mal control de mi enfermedad crónica por incumplimiento de
+    las indicaciones indicadas en el programa relacionadas a visitas médicas, tratamiento farmacológico,
+    consulta nutricional, cambios en mi estilo de vida, consulta por podología (en diabetes), y asistencia a
+    talleres y/o a las actividades educativas; se reevaluará mi permanencia dentro del Programa Vive Sano,
+    realizando un seguimiento del cumplimiento de indicaciones por un período de 03 meses. Finalizado ese
+    periodo, y de continuar con el incumplimiento, se procederá a mi retiro del Programa Vive Sano y seguiré
+    mis atenciones por consulta ambulatoria.
+</p>
+
+<p>
+    Declaro que el programa me brinda cobertura de atención médica por un médico de familia y/o internista
+    mediante teleconsulta, exámenes de laboratorio de acuerdo a mi red de salud y medicamentos de acuerdo a
+    petitorio, los mismos que son cubiertos al 100% si son medicamentos genéricos y exámenes de laboratorio
+    que forman parte del protocolo detallado en el plan de salud. Los medicamentos comerciales tienen el
+    tratamiento establecido en el plan de salud contratado.
+</p>
+
+<p>
+    Entiendo que puedo abandonar el Programa Vive Sano en el momento que desee, siempre que lo comunique por
+    lo menos con siete (07) días útiles de anticipación a mi próxima cita programada y que podré inscribirme
+    nuevamente en el Programa cuando cumpla las condiciones médicas y administrativas para hacerlo.
+</p>
+
+<div class="modalidad">
+    <p><strong>Modalidad de atención</strong><br>
+    En: <span class="campo-linea">{{ modalidad_atencion }}</span></p>
+</div>
+
+<div class="firma-bloque">
+    <img class="firma-imagen" src="data:image/png;base64,{{ firma_afiliado_b64 }}" alt="Firma del afiliado">
+    <div class="firma-linea">Firma del afiliado(a)</div>
+</div>
+
+<div class="metadata">
+    Documento generado digitalmente vía WhatsApp el {{ fecha_firma }} · Token: {{ token }} ·
+    Hash SHA-256 disponible en el sistema de registro · IP de firma registrada en base de datos.
+</div>
+
+</body>
+</html>

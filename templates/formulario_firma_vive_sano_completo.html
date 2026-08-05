@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Consentimiento Programa Vive Sano</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+        color: #222;
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 16px;
+        background: #f7f9fa;
+    }
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 2px solid #0090A6;
+        padding-bottom: 10px;
+        margin-bottom: 16px;
+    }
+    .logo { height: 34px; width: auto; }
+    h1 { font-size: 15px; color: #0090A6; text-align: right; margin: 0; line-height: 1.3; }
+    .card {
+        background: #fff;
+        border-radius: 10px;
+        padding: 18px;
+        margin-bottom: 14px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card-titulo {
+        color: #0090A6;
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 8px;
+    }
+    .datos-paciente { font-size: 14px; color: #444; margin-bottom: 10px; }
+    .datos-paciente strong { color: #0090A6; }
+    p { text-align: justify; margin: 0 0 12px 0; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+    input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 14px;
+        margin-bottom: 14px;
+    }
+    canvas {
+        border: 2px dashed #999;
+        border-radius: 8px;
+        width: 100%;
+        height: 160px;
+        touch-action: none;
+        background: #fff;
+    }
+    .firma-botones { display: flex; gap: 10px; margin-top: 8px; margin-bottom: 4px; }
+    .firma-botones button { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #eee; color: #333; }
+    .checkbox-acepto {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 14px 0;
+        font-size: 13.5px;
+    }
+    .checkbox-acepto input { margin-top: 3px; }
+    #btnEnviar {
+        width: 100%;
+        padding: 14px;
+        background: #0090A6;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    #btnEnviar:disabled { background: #b0d5da; cursor: not-allowed; }
+    #mensajeEstado { text-align: center; margin-top: 14px; font-size: 14px; }
+    #pantallaExito { display: none; text-align: center; padding: 40px 16px; }
+    #pantallaExito h2 { color: #0090A6; }
+    .subtitulo-cuidador { color: #0090A6; font-size: 14px; margin-bottom: 10px; }
+    .modalidad-opciones { display: flex; gap: 16px; margin-bottom: 14px; }
+    .opcion-radio { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 14px; margin-bottom: 0; }
+    .opcion-radio input { margin: 0; }
+    .patologia-preview {
+        background: #f0f7f8;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-size: 13.5px;
+        margin-bottom: 14px;
+        color: #333;
+    }
+</style>
+</head>
+<body>
+
+<div id="formularioContenedor">
+
+<div class="header">
+    <img class="logo" src="/assets/logo_sanitasperu.png" alt="Sanitas">
+    <h1>PROGRAMA VIVE SANO</h1>
+</div>
+
+<!-- ══════════ DOCUMENTO 1: CARTA DE COMPROMISO ══════════ -->
+<div class="card">
+    <div class="card-titulo">Documento 1 de 2 — Carta de Compromiso</div>
+    <div class="datos-paciente">
+        Paciente: <strong>{{ nombres }} {{ apellidos }}</strong><br>
+        DNI: <strong>{{ n_documento }}</strong>
+    </div>
+
+    <p>
+        Acepto inscribirme voluntariamente en el "Programa Vive Sano", programa por el cual Sanitas Perú S.A EPS
+        busca realizar el Control y Seguimiento de mis Enfermedades Crónicas y me ofrece bajo las condiciones
+        del Programa y según las especificaciones de mi plan de salud.
+    </p>
+    <p>
+        Me comprometo a seguir las indicaciones que mi médico tratante y los profesionales del equipo de salud
+        del Programa Vive Sano me ofrezcan dentro del desarrollo del Programa, y cumplir con el tratamiento
+        farmacológico y no farmacológico recetado.
+    </p>
+    <p>
+        Asumo el compromiso de acudir a las actividades educativas que realice el programa y alcanzar el peso
+        recomendado por los especialistas, siguiendo las pautas que me brinden para adoptar hábitos saludables.
+    </p>
+    <p>
+        Me comprometo a no efectuar consultas ambulatorias en forma paralela por el(los) mismo(s) diagnóstico(s)
+        incluido(s) en el presente documento, ya sea en otro centro o con otro médico que no forme parte del
+        equipo de médicos del programa Vive Sano.
+    </p>
+    <p>
+        Declaro conocer que el programa Vive Sano no contempla la atención ambulatoria de las eventuales
+        complicaciones de mi enfermedad. Toda situación de emergencia o urgencia médica, así como necesidad de
+        transferencia u hospitalización derivadas de estas complicaciones, serán atendidas bajo las condiciones
+        regulares indicadas en mi plan de salud y no forman parte del Programa Vive Sano.
+    </p>
+    <p>
+        Declaro haber sido instruido que al ingresar al programa Vive Sano, recibiré atenciones cada mes según
+        el diagnóstico que padezca, y de ser necesario seré atendido en una menor periodicidad. Una vez que mi
+        enfermedad se encuentre controlada y de acuerdo a criterio médico, mi control médico y evaluación se
+        realizará cada dos (02) o tres (03) meses, sin que se vea afectada la frecuencia del seguimiento
+        telefónico mensual hecho por una enfermera adscrita al Programa Vive Sano ni la entrega de mis
+        medicamentos.
+    </p>
+    <p>
+        Declaro conocer que en caso de evidencia de un mal control de mi enfermedad crónica por incumplimiento
+        de las indicaciones del Programa Vive Sano relacionadas a visitas médicas, tratamiento farmacológico,
+        consulta nutricional, cambios en mi estilo de vida, consulta por podología (en diabetes), y asistencia
+        a talleres y/o a las actividades educativas; se reevaluará mi permanencia dentro del Programa Vive Sano,
+        realizando un seguimiento del cumplimiento de indicaciones por un período de 03 meses. Finalizado ese
+        periodo, y de continuar con el incumplimiento, se procederá a mi retiro del Programa Vive Sano y deberé
+        seguir mis atenciones por consulta ambulatoria.
+    </p>
+    <p>
+        Declaro haber sido informado que está permitido realizar solo dos (02) reprogramaciones al año de las
+        visitas médicas concertadas, reprogramación que deberá ser notificada con 48 horas de anticipación a la
+        cita programada.
+    </p>
+    <p>
+        Entiendo que puedo abandonar el Programa Vive Sano en el momento que desee siempre que lo comunique por
+        lo menos con siete (07) días útiles de anticipación a mi próxima cita programada y que podré inscribirme
+        nuevamente en el Programa cuando cumpla las condiciones médicas y administrativas para hacerlo.
+    </p>
+
+    <label>Modalidad de atención</label>
+    <div class="modalidad-opciones">
+        <label class="opcion-radio"><input type="radio" name="modalidadAtencion" value="Presencial"> Presencial</label>
+        <label class="opcion-radio"><input type="radio" name="modalidadAtencion" value="Domicilio"> Domicilio</label>
+        <label class="opcion-radio"><input type="radio" name="modalidadAtencion" value="Virtual"> Virtual</label>
+    </div>
+
+    <label>Tu firma (Carta de Compromiso)</label>
+    <canvas id="canvasFirmaCarta"></canvas>
+    <div class="firma-botones">
+        <button type="button" id="btnLimpiarCarta">Limpiar firma</button>
+    </div>
+
+    <div class="checkbox-acepto">
+        <input type="checkbox" id="checkAceptoCarta">
+        <label for="checkAceptoCarta" style="margin:0;">He leído y acepto los términos y condiciones de la Carta de Compromiso.</label>
+    </div>
+</div>
+
+{% if requiere_cuidador %}
+<div class="card">
+    <p class="subtitulo-cuidador"><strong>Declaración del familiar responsable</strong></p>
+    <p>
+        Según la evaluación del equipo de salud, este caso requiere la asistencia de un cuidador primario que
+        brinde apoyo emocional, cuidados, y acompañamiento en el tratamiento.
+    </p>
+
+    <label for="nombreCuidador">Nombre completo del cuidador/familiar responsable</label>
+    <input type="text" id="nombreCuidador" placeholder="Nombres y apellidos">
+
+    <label for="dniCuidador">DNI/CE/Pasaporte del cuidador</label>
+    <input type="text" id="dniCuidador" placeholder="Número de documento">
+
+    <label for="parentescoCuidador">Parentesco con el paciente</label>
+    <input type="text" id="parentescoCuidador" placeholder="Ej. Hijo(a), cónyuge, hermano(a)">
+
+    <label>Firma del familiar responsable</label>
+    <canvas id="canvasFirmaCuidador"></canvas>
+    <div class="firma-botones">
+        <button type="button" id="btnLimpiarCuidador">Limpiar firma</button>
+    </div>
+</div>
+{% endif %}
+
+<!-- ══════════ DOCUMENTO 2: FICHA DE INSCRIPCIÓN ══════════ -->
+<div class="card">
+    <div class="card-titulo">Documento 2 de 2 — Ficha de Inscripción</div>
+
+    <div class="patologia-preview">
+        Diagnóstico registrado: <strong>{{ diagnostico_detectado }}</strong>
+    </div>
+
+    <label for="domicilioInput">Domicilio</label>
+    <input type="text" id="domicilioInput" value="{{ domicilio }}" placeholder="Dirección completa">
+
+    <label for="distritoInput">Distrito</label>
+	<input type="text" id="distritoInput" value="{{ distrito }}" placeholder="Ej. Santiago De Surco">
+
+	<label for="provinciaInput">Provincia</label>
+	<input type="text" id="provinciaInput" value="{{ provincia }}" placeholder="Ej. Lima">
+
+	<label for="departamentoInput">Departamento</label>
+	<input type="text" id="departamentoInput" value="{{ departamento }}" placeholder="Ej. Lima">
+
+    <label>Firma (Ficha de Inscripción)</label>
+    <canvas id="canvasFirmaFicha"></canvas>
+    <div class="firma-botones">
+        <button type="button" id="btnLimpiarFicha">Limpiar firma</button>
+    </div>
+
+    <div class="checkbox-acepto">
+        <input type="checkbox" id="checkAceptoFicha">
+        <label for="checkAceptoFicha" style="margin:0;">Confirmo que los datos de esta ficha de inscripción son correctos.</label>
+    </div>
+</div>
+
+<div class="card">
+    <button id="btnEnviar" disabled>Firmar y confirmar</button>
+    <div id="mensajeEstado"></div>
+</div>
+
+</div>
+
+<div id="pantallaExito">
+    <h2>¡Listo!</h2>
+    <p>Tu inscripción quedó registrada. Te enviamos tu comprobante por WhatsApp.</p>
+</div>
+
+<script>
+const token = "{{ token }}";
+const requiereCuidador = {{ "true" if requiere_cuidador else "false" }};
+
+function crearManejadorFirma(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    let dibujando = false;
+    let haFirmado = false;
+
+    function ajustarCanvas() {
+        const ratio = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * ratio;
+        canvas.height = rect.height * ratio;
+        ctx.scale(ratio, ratio);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#111';
+    }
+    ajustarCanvas();
+
+    function obtenerPosicion(e) {
+        const rect = canvas.getBoundingClientRect();
+        if (e.touches && e.touches.length > 0) {
+            return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+        }
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function iniciarTrazo(e) {
+        e.preventDefault();
+        dibujando = true;
+        haFirmado = true;
+        const pos = obtenerPosicion(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        actualizarBotonEnviar();
+    }
+    function trazar(e) {
+        if (!dibujando) return;
+        e.preventDefault();
+        const pos = obtenerPosicion(e);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+    }
+    function terminarTrazo() { dibujando = false; }
+
+    canvas.addEventListener('mousedown', iniciarTrazo);
+    canvas.addEventListener('mousemove', trazar);
+    canvas.addEventListener('mouseup', terminarTrazo);
+    canvas.addEventListener('mouseleave', terminarTrazo);
+    canvas.addEventListener('touchstart', iniciarTrazo);
+    canvas.addEventListener('touchmove', trazar);
+    canvas.addEventListener('touchend', terminarTrazo);
+
+    return {
+        limpiar: () => { ctx.clearRect(0, 0, canvas.width, canvas.height); haFirmado = false; actualizarBotonEnviar(); },
+        haFirmado: () => haFirmado,
+        obtenerBase64: () => canvas.toDataURL('image/png').split(',')[1]
+    };
+}
+
+const firmaCarta = crearManejadorFirma('canvasFirmaCarta');
+document.getElementById('btnLimpiarCarta').addEventListener('click', firmaCarta.limpiar);
+
+const firmaFicha = crearManejadorFirma('canvasFirmaFicha');
+document.getElementById('btnLimpiarFicha').addEventListener('click', firmaFicha.limpiar);
+
+let firmaCuidador = null;
+if (requiereCuidador) {
+    firmaCuidador = crearManejadorFirma('canvasFirmaCuidador');
+    document.getElementById('btnLimpiarCuidador').addEventListener('click', firmaCuidador.limpiar);
+}
+
+const checkAceptoCarta = document.getElementById('checkAceptoCarta');
+const checkAceptoFicha = document.getElementById('checkAceptoFicha');
+checkAceptoCarta.addEventListener('change', actualizarBotonEnviar);
+checkAceptoFicha.addEventListener('change', actualizarBotonEnviar);
+document.getElementById('domicilioInput').addEventListener('input', actualizarBotonEnviar);
+document.getElementById('distritoInput').addEventListener('input', actualizarBotonEnviar);
+document.getElementById('provinciaInput').addEventListener('input', actualizarBotonEnviar);
+document.getElementById('departamentoInput').addEventListener('input', actualizarBotonEnviar);
+document.querySelectorAll('input[name="modalidadAtencion"]').forEach(radio => {
+    radio.addEventListener('change', actualizarBotonEnviar);
+});
+
+function actualizarBotonEnviar() {
+    const modalidadSeleccionada = document.querySelector('input[name="modalidadAtencion"]:checked');
+    let listo = firmaCarta.haFirmado() && checkAceptoCarta.checked
+        && firmaFicha.haFirmado() && checkAceptoFicha.checked
+        && modalidadSeleccionada !== null
+        && document.getElementById('domicilioInput').value.trim() !== ''
+        && document.getElementById('distritoInput').value.trim() !== ''
+		&& document.getElementById('provinciaInput').value.trim() !== ''
+		&& document.getElementById('departamentoInput').value.trim() !== '';
+
+    if (requiereCuidador) {
+        listo = listo && firmaCuidador.haFirmado()
+            && document.getElementById('nombreCuidador').value.trim() !== ''
+            && document.getElementById('dniCuidador').value.trim() !== '';
+    }
+    document.getElementById('btnEnviar').disabled = !listo;
+}
+
+if (requiereCuidador) {
+    document.getElementById('nombreCuidador').addEventListener('input', actualizarBotonEnviar);
+    document.getElementById('dniCuidador').addEventListener('input', actualizarBotonEnviar);
+}
+
+document.getElementById('btnEnviar').addEventListener('click', async () => {
+    const btn = document.getElementById('btnEnviar');
+    const mensajeEstado = document.getElementById('mensajeEstado');
+    btn.disabled = true;
+    mensajeEstado.textContent = "Enviando...";
+
+    const payload = {
+        token: token,
+        firma_carta_base64: firmaCarta.obtenerBase64(),
+        firma_ficha_base64: firmaFicha.obtenerBase64(),
+        modalidad_atencion: document.querySelector('input[name="modalidadAtencion"]:checked').value,
+        domicilio: document.getElementById('domicilioInput').value,
+        distrito: document.getElementById('distritoInput').value,
+		provincia: document.getElementById('provinciaInput').value,
+		departamento: document.getElementById('departamentoInput').value
+    };
+
+    if (requiereCuidador) {
+        payload.firma_cuidador_base64 = firmaCuidador.obtenerBase64();
+        payload.nombre_cuidador = document.getElementById('nombreCuidador').value;
+        payload.dni_cuidador = document.getElementById('dniCuidador').value;
+        payload.parentesco_cuidador = document.getElementById('parentescoCuidador').value;
+    }
+
+    try {
+        const resp = await fetch('/programa-cronico/firmar-consentimiento', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok) {
+            document.getElementById('formularioContenedor').style.display = 'none';
+            document.getElementById('pantallaExito').style.display = 'block';
+        } else {
+            mensajeEstado.textContent = "Error: " + (data.error || "No se pudo completar el registro.");
+            btn.disabled = false;
+        }
+    } catch (err) {
+        mensajeEstado.textContent = "Error de conexión. Intenta nuevamente.";
+        btn.disabled = false;
+    }
+});
+</script>
+
+</body>
+</html>

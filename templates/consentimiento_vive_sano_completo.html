@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Carta de Compromiso - Programa Vive Sano</title>
+<style>
+    @page {
+        size: A4;
+        margin: 2.2cm 2cm;
+        @bottom-center {
+            content: "Página " counter(page) " de " counter(pages);
+            font-size: 8pt;
+            color: #888;
+        }
+    }
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.5;
+        color: #222;
+    }
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 2px solid #0090A6;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+    }
+    .logo {
+		width: 140px;
+		height: auto;
+	}
+	h1 {
+        font-size: 13pt;
+        color: #0090A6;
+        text-align: right;
+        margin: 0;
+        line-height: 1.3;
+    }
+    .intro {
+        margin-bottom: 14px;
+    }
+    .campo-linea {
+        border-bottom: 1px dotted #555;
+        padding: 0 4px;
+        font-weight: 600;
+    }
+    p {
+        text-align: justify;
+        margin: 0 0 12px 0;
+    }
+    .checkbox {
+        font-family: monospace;
+        font-size: 11pt;
+    }
+    .modalidad {
+        margin-top: 20px;
+    }
+    .firma-bloque {
+        margin-top: 40px;
+        text-align: center;
+    }
+    .firma-imagen {
+        max-width: 220px;
+        max-height: 80px;
+        display: block;
+        margin: 0 auto 4px auto;
+    }
+    .firma-linea {
+        border-top: 1px solid #333;
+        width: 260px;
+        margin: 0 auto;
+        padding-top: 4px;
+        font-size: 9.5pt;
+    }
+    .seccion-cuidador {
+        margin-top: 30px;
+        border-top: 1px solid #ccc;
+        padding-top: 16px;
+    }
+    .seccion-cuidador h2 {
+        font-size: 10.5pt;
+        color: #0090A6;
+        margin-bottom: 8px;
+    }
+    .metadata {
+        margin-top: 50px;
+        font-size: 7.5pt;
+        color: #999;
+        border-top: 1px solid #eee;
+        padding-top: 8px;
+    }
+    .page-break {
+        page-break-before: always;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <img class="logo" src="assets/logo_sanitasperu.png" alt="Sanitas">
+    <h1>CARTA DE COMPROMISO<br>PROGRAMA VIVE SANO</h1>
+</div>
+
+<div class="intro">
+    <p>
+        Yo, <span class="campo-linea">{{ nombres }} {{ apellidos }}</span>,
+        identificado(a) con
+        DNI(<span class="checkbox">{{ "X" if tipo_documento == "DNI" else " " }}</span>)
+        CE(<span class="checkbox">{{ "X" if tipo_documento == "CE" else " " }}</span>)
+        Pasaporte(<span class="checkbox">{{ "X" if tipo_documento == "Pasaporte" else " " }}</span>)
+        N° <span class="campo-linea">{{ n_documento }}</span>,
+        acepto inscribirme voluntariamente en el "Programa Vive Sano", programa por el cual Sanitas Perú S.A EPS
+        busca realizar el Control y Seguimiento de mis Enfermedades Crónicas y me ofrece bajo las condiciones
+        del Programa y según las especificaciones de mi plan de salud.
+    </p>
+
+    <p>
+        Me comprometo a seguir las indicaciones que mi médico tratante y los profesionales del equipo de salud
+        del Programa Vive Sano me ofrezcan dentro del desarrollo del Programa, y cumplir con el tratamiento
+        farmacológico y no farmacológico recetado.
+    </p>
+
+    <p>
+        Asumo el compromiso de acudir a las actividades educativas que realice el programa y alcanzar el peso
+        recomendado por los especialistas, siguiendo las pautas que me brinden para adoptar hábitos saludables.
+    </p>
+
+    <p>
+        Me comprometo a no efectuar consultas ambulatorias en forma paralela por el(los) mismo(s) diagnóstico(s)
+        incluido(s) en el presente documento, ya sea en otro centro o con otro médico que no forme parte del
+        equipo de médicos del programa Vive Sano.
+    </p>
+
+    <p>
+        Declaro conocer que el programa Vive Sano no contempla la atención ambulatoria de las eventuales
+        complicaciones de mi enfermedad. Toda situación de emergencia o urgencia médica, así como necesidad de
+        transferencia u hospitalización derivadas de estas complicaciones, serán atendidas bajo las condiciones
+        regulares indicadas en mi plan de salud y no forman parte del Programa Vive Sano.
+    </p>
+
+    <p>
+        Declaro haber sido instruido que al ingresar al programa Vive Sano, recibiré atenciones cada mes según
+        el diagnóstico que padezca, y de ser necesario seré atendido en una menor periodicidad. Una vez que mi
+        enfermedad se encuentre controlada y de acuerdo a criterio médico, mi control médico y evaluación se
+        realizará cada dos (02) o tres (03) meses, sin que se vea afectada la frecuencia del seguimiento
+        telefónico mensual hecho por una enfermera adscrita al Programa Vive Sano ni la entrega de mis
+        medicamentos.
+    </p>
+
+    <p>
+        Declaro conocer que en caso de evidencia de un mal control de mi enfermedad crónica por incumplimiento
+        de las indicaciones del Programa Vive Sano relacionadas a visitas médicas, tratamiento farmacológico,
+        consulta nutricional, cambios en mi estilo de vida, consulta por podología (en diabetes), y asistencia
+        a talleres y/o a las actividades educativas; se reevaluará mi permanencia dentro del Programa Vive Sano,
+        realizando un seguimiento del cumplimiento de indicaciones por un período de 03 meses. Finalizado ese
+        periodo, y de continuar con el incumplimiento, se procederá a mi retiro del Programa Vive Sano y deberé
+        seguir mis atenciones por consulta ambulatoria.
+    </p>
+
+    <p>
+        Declaro haber sido informado que está permitido realizar solo dos (02) reprogramaciones al año de las
+        visitas médicas concertadas, reprogramación que deberá ser notificada con 48 horas de anticipación a la
+        cita programada.
+    </p>
+
+    <p>
+        Entiendo que puedo abandonar el Programa Vive Sano en el momento que desee siempre que lo comunique por
+        lo menos con siete (07) días útiles de anticipación a mi próxima cita programada y que podré inscribirme
+        nuevamente en el Programa cuando cumpla las condiciones médicas y administrativas para hacerlo.
+    </p>
+</div>
+
+<div class="modalidad">
+    <p><strong>Modalidad de atención</strong><br>
+    En: <span class="campo-linea">{{ modalidad_atencion }}</span></p>
+</div>
+
+<div class="firma-bloque">
+    <img class="firma-imagen" src="data:image/png;base64,{{ firma_afiliado_b64 }}" alt="Firma del afiliado">
+    <div class="firma-linea">Firma del afiliado(a)</div>
+</div>
+
+{% if requiere_cuidador %}
+<div class="seccion-cuidador page-break">
+    <h2>(Para ser llenado por los profesionales de salud del programa Vive Sano)</h2>
+    <p>
+        Según el grado de dependencia (escala de Barthel), se determinó que el paciente
+        <strong>{{ "SÍ" if requiere_cuidador else "NO" }} requiere</strong> la asistencia de un cuidador primario.
+    </p>
+
+    <h2>Declaración del familiar responsable</h2>
+    <p>
+        Yo, <span class="campo-linea">{{ nombre_cuidador }}</span>, identificado con DNI/CE/Pasaporte
+        N° <span class="campo-linea">{{ dni_cuidador }}</span>, en calidad de
+        <span class="campo-linea">{{ parentesco_cuidador }}</span>, declaro bajo juramento que he sido
+        instruido que, debido al grado de dependencia de mi familiar
+        <span class="campo-linea">{{ nombres }} {{ apellidos }}</span>, es necesario que cuente con un
+        cuidador que le brinde apoyo emocional, los cuidados que requiera, asistencia para el cumplimiento
+        del tratamiento médico, acompañamiento a las consultas, y en su interacción con el personal de salud
+        del programa Vive Sano proporcione información de la condición de salud de mi familiar y cualquier
+        otro dato relevante para hacer un adecuado seguimiento y control médico.
+    </p>
+    <p>Por lo tanto, declaro que acepto esta condición:</p>
+
+    <div class="firma-bloque">
+        <img class="firma-imagen" src="data:image/png;base64,{{ firma_cuidador_b64 }}" alt="Firma del familiar responsable">
+        <div class="firma-linea">Firma del familiar responsable</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="metadata">
+    Documento generado digitalmente vía WhatsApp el {{ fecha_firma }} (hora Perú) · Token: {{ token }} ·
+    IP de firma: {{ ip_firma }} · Hash SHA-256 disponible en el sistema de registro.
+</div>
+
+</body>
+</html>

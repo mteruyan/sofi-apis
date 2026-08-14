@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Solicitud de Afiliación Regular</title>
+<style>
+@page {
+    size: A4;
+    margin: 14mm 12mm 16mm 12mm;
+    @bottom-center {
+        content: "Página " counter(page) " de " counter(pages);
+        font-size: 8px;
+        color: #667;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 9.5px;
+    color: #1a1a2e;
+    line-height: 1.35;
+}
+
+.encabezado {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #00A9B7;
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+}
+.encabezado .logo-texto {
+    font-size: 20px;
+    font-weight: 800;
+    color: #003654;
+}
+.encabezado .logo-texto span { color: #00A9B7; }
+.encabezado .datos-solicitud {
+    text-align: right;
+    font-size: 9px;
+}
+.encabezado .datos-solicitud div { margin-bottom: 2px; }
+.encabezado .datos-solicitud b { color: #003654; }
+
+h1.titulo {
+    text-align: center;
+    font-size: 13px;
+    color: #003654;
+    margin: 4px 0 10px;
+    letter-spacing: 0.4px;
+}
+
+.badges { text-align: center; margin-bottom: 10px; font-size: 9.5px; }
+.badges span {
+    display: inline-block;
+    padding: 2px 10px;
+    border: 1px solid #00A9B7;
+    border-radius: 3px;
+    margin: 0 4px;
+    color: #007A87;
+    font-weight: 600;
+}
+
+.seccion-titulo {
+    background: #003654;
+    color: #fff;
+    padding: 4px 8px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    margin-top: 10px;
+    margin-bottom: 0;
+}
+
+table.datos {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4px;
+}
+table.datos td {
+    border: 1px solid #DCE4E8;
+    padding: 3px 6px;
+    vertical-align: top;
+}
+table.datos td.etiqueta {
+    background: #F4F7F9;
+    font-weight: 700;
+    width: 20%;
+    color: #003654;
+}
+
+table.dependientes {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+    font-size: 8.8px;
+}
+table.dependientes th {
+    background: #00A9B7;
+    color: #fff;
+    padding: 3px 5px;
+    text-align: left;
+}
+table.dependientes td {
+    border: 1px solid #DCE4E8;
+    padding: 2px 4px;
+}
+
+table.salud {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    margin-bottom: 6px;
+    font-size: 8.3px;
+}
+table.salud th {
+    background: #003654;
+    color: #fff;
+    padding: 3px 4px;
+    text-align: center;
+}
+table.salud th.col-pregunta { text-align: left; width: 46%; }
+table.salud td {
+    border: 1px solid #DCE4E8;
+    padding: 2.5px 4px;
+    text-align: center;
+}
+table.salud td.col-pregunta { text-align: left; }
+table.salud tr:nth-child(even) td { background: #FAFCFD; }
+.respuesta-si { color: #D64545; font-weight: 800; }
+.respuesta-no { color: #2E9E5B; font-weight: 700; }
+
+table.diagnosticos, table.antecedentes {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    font-size: 8.3px;
+}
+table.diagnosticos th, table.antecedentes th {
+    background: #6B7A82;
+    color: #fff;
+    padding: 3px 5px;
+    text-align: left;
+}
+table.diagnosticos td, table.antecedentes td {
+    border: 1px solid #DCE4E8;
+    padding: 3px 5px;
+}
+
+.texto-legal {
+    font-size: 7.6px;
+    color: #444;
+    text-align: justify;
+    line-height: 1.4;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+.texto-legal p { margin: 0 0 5px 0; }
+.texto-legal ul { margin: 3px 0 5px 14px; padding: 0; }
+
+.bloque-firma {
+    margin-top: 22px;
+    display: flex;
+    justify-content: space-between;
+    page-break-inside: avoid;
+}
+.bloque-firma .caja-firma {
+    width: 46%;
+    text-align: center;
+}
+.bloque-firma img.firma {
+    max-height: 55px;
+    max-width: 100%;
+    border-bottom: 1px solid #1a1a2e;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+.bloque-firma .linea {
+    border-top: 1px solid #1a1a2e;
+    margin-top: 40px;
+    padding-top: 3px;
+    font-size: 8.5px;
+    font-weight: 600;
+}
+
+.salto-pagina { page-break-before: always; }
+
+.nota-vacio { color: #888; font-style: italic; }
+
+.checkbox {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1.3px solid #333;
+    vertical-align: middle;
+    margin-right: 3px;
+    position: relative;
+}
+.checkbox.checked {
+    background-color: #333;
+}
+
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ ENCABEZADO ═══════════════════ -->
+<div class="encabezado">
+    <img src="assets/logo_sanitasperu.png" alt="Sanitas Perú" style="height: 32px;">
+    <div class="datos-solicitud">
+        <div><b>Solicitud N°:</b> {{ solicitud.id }}</div>
+        <div><b>Token:</b> {{ solicitud.token }}</div>
+        <div><b>Fecha de emisión:</b> {{ fecha_emision }}</div>
+        {% if solicitud.contrato_origen %}<div><b>Contrato:</b> {{ solicitud.contrato_origen }}</div>{% endif %}
+    </div>
+</div>
+
+<h1 class="titulo">SOLICITUD DE AFILIACIÓN REGULAR</h1>
+
+<div class="badges">
+    <span><span class="checkbox {{ 'checked' if solicitud.tipo_solicitud == 'AFILIACION' }}"></span> AFILIACIÓN</span>
+    <span><span class="checkbox {{ 'checked' if solicitud.tipo_solicitud == 'INCLUSION' }}"></span> INCLUSIÓN</span>
+    <span><span class="checkbox {{ 'checked' if solicitud.tipo_solicitud == 'TRASLADO' }}"></span> TRASLADO SANITAS PERÚ
+        {% if solicitud.tipo_solicitud == "TRASLADO" %}(Contrato N° {{ solicitud.contrato_origen or "—" }}){% endif %}
+    </span>
+</div>
+
+<!-- ═══════════════════ 1. ENTIDAD EMPLEADORA ═══════════════════ -->
+<div class="seccion-titulo">1. INFORMACIÓN DE LA ENTIDAD EMPLEADORA</div>
+<table class="datos">
+    <tr>
+        <td class="etiqueta">Razón Social</td><td>{{ solicitud.empresa_razon_social or "—" }}</td>
+        <td class="etiqueta">RUC</td><td>{{ solicitud.ruc or "—" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Dirección</td><td colspan="3">{{ solicitud.empresa_direccion or "—" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Distrito / Provincia / Dpto.</td>
+        <td colspan="3">{{ solicitud.empresa_distrito or "—" }} / {{ solicitud.empresa_provincia or "—" }} / {{ solicitud.empresa_departamento or "—" }}</td>
+    </tr>
+</table>
+
+<div class="seccion-titulo">ELECCIÓN DEL PLAN</div>
+<table class="datos">
+    <tr>
+        <td class="etiqueta">Plan elegido</td>
+        <td><b>{{ solicitud.plan or "—" }}</b> &nbsp; (Titular, cónyuge e hijos hasta los 18 años)</td>
+    </tr>
+</table>
+
+<!-- ═══════════════════ 2. TITULAR ═══════════════════ -->
+<div class="seccion-titulo">2. INFORMACIÓN DEL TITULAR</div>
+<table class="datos">
+    <tr>
+        <td class="etiqueta">Apellido Paterno</td><td>{{ solicitud.titular_apellido_paterno or "—" }}</td>
+        <td class="etiqueta">Apellido Materno</td><td>{{ solicitud.titular_apellido_materno or "—" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Nombres</td><td>{{ solicitud.titular_nombres or "—" }}</td>
+        <td class="etiqueta">Fecha de Nacimiento</td><td>{{ solicitud.titular_fecha_nacimiento | fmt_fecha }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Sexo</td><td>{{ solicitud.titular_sexo or "—" }}</td>
+        <td class="etiqueta">Documento</td><td>{{ solicitud.titular_tipo_documento or "—" }} {{ solicitud.titular_num_documento or "" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Nacionalidad</td><td>{{ solicitud.titular_nacionalidad or "—" }}</td>
+        <td class="etiqueta">Estado Civil</td><td>{{ solicitud.titular_estado_civil or "—" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Dirección</td><td colspan="3">{{ solicitud.titular_direccion or "—" }}</td>
+    </tr>
+    <tr>
+        <td class="etiqueta">Distrito / Provincia / Dpto.</td>
+        <td colspan="3">{{ solicitud.titular_distrito or "—" }} / {{ solicitud.titular_provincia or "—" }} / {{ solicitud.titular_departamento or "—" }}</td>
+    </tr>
+    <tr>
+		<td class="etiqueta">Celular Ingresado / Celular Origen</td><td>{{ solicitud.celular_origen_wsp or "—" }} / {{ solicitud.titular_celular or "—" }}</td>
+        <td class="etiqueta">E-mail</td><td>{{ solicitud.titular_email or "—" }}</td>
+    </tr>
+</table>
+
+<div class="texto-legal">
+<p>La legislación vigente del sistema de seguridad social considera que todos los trabajadores y sus
+derechohabientes tengan cobertura de salud (EsSalud o EPS). Si un trabajador se afilia a una EPS, tanto
+él como sus derechohabientes pierden la cobertura de PEAS en EsSalud y trasladan a su respectiva EPS. Es
+por lo anterior que, de no afiliarlos, quedarían desprotegidos para los diagnósticos PEAS; sin embargo,
+si dichos derechohabientes gozan de una cobertura de salud a través del cónyuge que labora en otra
+entidad empleadora, ya no resulta indispensable que el primero los afilie a su EPS.</p>
+</div>
+
+<!-- ═══════════════════ DEPENDIENTES ═══════════════════ -->
+{% if dependientes %}
+<div class="seccion-titulo">INFORMACIÓN DE LOS DERECHOHABIENTES O DEPENDIENTES</div>
+<table class="dependientes">
+    <thead>
+        <tr>
+            <th>Cód.</th><th>Apellido Paterno</th><th>Apellido Materno</th><th>Nombres</th>
+            <th>Sexo</th><th>F. Nacimiento</th><th>Documento</th><th>Nacionalidad</th><th>Parentesco</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in dependientes %}
+        <tr>
+            <td>{{ d.codigo }}</td>
+            <td>{{ d.apellido_paterno or "—" }}</td>
+            <td>{{ d.apellido_materno or "—" }}</td>
+            <td>{{ d.nombres or "—" }}</td>
+            <td>{{ d.sexo or "—" }}</td>
+            <td>{{ d.fecha_nacimiento | fmt_fecha }}</td>
+            <td>{{ d.tipo_documento or "" }} {{ d.num_documento or "" }}</td>
+            <td>{{ d.nacionalidad or "—" }}</td>
+            <td>{{ d.parentesco or "—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<!-- ═══════════════════ 3. DECLARACIÓN DE SALUD ═══════════════════ -->
+<div class="salto-pagina"></div>
+<div class="seccion-titulo">3. DECLARACIÓN DE SALUD</div>
+<div class="texto-legal">
+<p>Responda SI o NO en cada casilla según corresponda. En caso su respuesta sea afirmativa, se detalla
+el diagnóstico correspondiente en la tabla de la página siguiente.</p>
+</div>
+
+<table class="salud">
+    <thead>
+        <tr>
+            <th class="col-pregunta">Pregunta</th>
+            <th>T</th>
+            {% for d in dependientes %}<th>{{ d.codigo }}</th>{% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td class="col-pregunta">Peso (kg) / Talla (cm)</td>
+            <td>
+                {{ declaracion_salud.get("T", {}).get("peso_kg") or "—" }} /
+                {{ declaracion_salud.get("T", {}).get("talla_cm") or "—" }}
+            </td>
+            {% for d in dependientes %}
+            <td>
+                {{ declaracion_salud.get(d.codigo, {}).get("peso_kg") or "—" }} /
+                {{ declaracion_salud.get(d.codigo, {}).get("talla_cm") or "—" }}
+            </td>
+            {% endfor %}
+        </tr>
+        {% for pregunta in preguntas_salud %}
+        <tr>
+            <td class="col-pregunta">{{ pregunta.codigo }} — {{ pregunta.texto }}</td>
+            {% set resp_t = declaracion_salud.get("T", {}).get("respuestas", {}).get(pregunta.codigo) %}
+            <td class="{{ 'respuesta-si' if resp_t == 'S' else ('respuesta-no' if resp_t == 'N' else '') }}">
+                {{ resp_t or "—" }}
+            </td>
+            {% for d in dependientes %}
+            {% set resp_d = declaracion_salud.get(d.codigo, {}).get("respuestas", {}).get(pregunta.codigo) %}
+            <td class="{{ 'respuesta-si' if resp_d == 'S' else ('respuesta-no' if resp_d == 'N' else '') }}">
+                {{ resp_d or "—" }}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if diagnosticos %}
+<div class="seccion-titulo">DETALLE DE DIAGNÓSTICOS DECLARADOS</div>
+<table class="diagnosticos">
+    <thead>
+        <tr>
+            <th>Afiliado</th><th>Diagnóstico</th><th>Extremidad</th>
+            <th>Médico Tratante</th><th>Fecha Diagnóstico</th><th>Situación Actual</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for diag in diagnosticos %}
+        <tr>
+            <td>{{ diag.persona_codigo }}</td>
+            <td>{{ diag.diagnostico or "—" }}</td>
+            <td>{{ diag.extremidad or "N/A" }}</td>
+            <td>{{ diag.medico_tratante or "—" }}</td>
+            <td>{{ diag.fecha_diagnostico | fmt_fecha }}</td>
+            <td>{{ diag.situacion_actual or "—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<div class="texto-legal">
+<p>Con el propósito de dar continuidad a la cobertura de preexistencias en el plan de salud, de acuerdo
+a lo establecido en la Ley N° 29561 y su Reglamento D.S. N° 008-2012-SA, todo titular de un plan de salud
+EPS deberá declarar bajo juramento si se encuentra o ha encontrado bajo la cobertura de un plan de salud
+en el sistema de EPS. De estarlo o haberlo estado, deberá indicar el nombre de esta y la fecha de cese de
+su último vínculo laboral. La continuidad de cobertura de preexistencias opera con la sola presentación
+de la declaración jurada. Por el presente documento, el titular autoriza a Sanitas Perú EPS para que
+pueda solicitar la información necesaria a su anterior EPS, respecto a las condiciones, limitaciones y
+exclusiones de la cobertura del plan de salud que tenía contratado, así como el reporte de las
+prestaciones de salud recibidas por el titular y sus derechohabientes durante su vigencia.</p>
+</div>
+
+<!-- ═══════════════════ 4. ANTECEDENTES EN EL SISTEMA DE SALUD ═══════════════════ -->
+<div class="seccion-titulo">4. ANTECEDENTES EN EL SISTEMA DE SALUD</div>
+{% if antecedentes_seguro %}
+<table class="antecedentes">
+    <thead>
+        <tr>
+            <th>Afiliado</th><th>¿Tuvo seguro?</th><th>Tipo</th><th>Modalidad</th>
+            <th>Asegurador Anterior</th><th>Desde</th><th>Hasta</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for a in antecedentes_seguro %}
+        <tr>
+            <td>{{ a.persona_codigo }}</td>
+            <td>{{ "Sí" if a.tuvo_seguro else "No" }}</td>
+            <td>{{ a.tipo_seguro or "—" }}</td>
+            <td>{{ a.modalidad or "—" }}</td>
+            <td>{{ a.asegurador_anterior or "—" }}</td>
+            <td>{{ a.fecha_desde | fmt_fecha }}</td>
+            <td>{{ a.fecha_hasta | fmt_fecha }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="nota-vacio">Ningún afiliado declaró haber tenido seguro de salud anterior.</p>
+{% endif %}
+
+<!-- ═══════════════════ DECLARACIONES LEGALES ═══════════════════ -->
+<div class="salto-pagina"></div>
+<div class="seccion-titulo">DECLARACIONES DEL AFILIADO</div>
+<div class="texto-legal">
+<p>Declaro que la información que he proporcionado en esta solicitud y la de mis derechohabientes o
+dependientes es veraz, legítima, actual, completa, precisa y pertinente, y es de mi conocimiento que
+cualquier falsedad, simulación u omisión voluntaria o involuntaria, anula y deja sin efecto alguno la
+cobertura del plan de salud, librando de toda responsabilidad y compromiso a Sanitas Perú EPS.</p>
+
+<p>Asimismo, tengo conocimiento que Sanitas Perú EPS se reserva el derecho de calificar el riesgo en base
+a las respuestas y declaraciones contenidas en este documento, y/o tomando en cuenta los antecedentes
+médicos, datos del archivo médico, exámenes de laboratorio, copia de historia clínica o cualquier
+documento médico, con la finalidad de determinar las condiciones que correspondan para el otorgamiento
+de cobertura de capa compleja o no PEAS, así como la(s) preexistencia(s) de capa compleja o no PEAS que
+será(n) excluida(s) de la cobertura. En caso de declaración falsa o inexacta, acepto reintegrar a Sanitas
+Perú EPS el monto de los gastos en los que esta hubiera podido incurrir por la atención de mi(s)
+enfermedad(es) preexistente(s) no declarada(s) o por la atención de la(s) enfermedad(es) preexistente(s)
+no declarada(s) de cualquiera de mis derechohabientes legales.</p>
+
+<p>Quien suscribe el presente documento autoriza expresamente a Sanitas Perú S.A. Entidad Prestadora de
+Salud a solicitar a la EPS inmediatamente anterior las condiciones, limitaciones y exclusiones de la
+cobertura del plan de salud que tenía contratado con esta última, así como el reporte de las prestaciones
+de salud recibidas por mis derechohabientes y por mí, con la finalidad de dar continuidad a la cobertura
+de preexistencias en el plan de salud, de acuerdo a lo establecido en la Ley N° 29561 y su reglamento
+D.S. N° 008-2012-SA; asimismo, autorizo expresamente a las clínicas, hospitales, centros médicos,
+laboratorios y médicos tratantes, a facilitar el acceso a los documentos médicos relacionados con las
+prestaciones de salud recibidas.</p>
+
+<p><b>Declaro que:</b></p>
+<ul>
+    <li>Conozco que la omisión y/o imprecisiones respecto al llenado de la Declaración Jurada de Salud
+    que consta en el presente documento impacta de forma esencial en la evaluación del riesgo y, por
+    ende, en la cobertura del plan de salud.</li>
+    <li>Conozco que la reticencia y/o declaración inexacta, hecha con dolo o culpa inexcusable
+    (negligencia grave), en el llenado de la presente solicitud genera la nulidad del contrato del plan
+    de salud.</li>
+</ul>
+
+<p><b>Medios de comunicación pactados:</b> escrito, correo electrónico y telefónico. Mediante el
+presente documento autorizo a Sanitas Perú EPS a que, en caso de aprobar la presente solicitud, sea
+válida cualquier comunicación y/o notificación vinculada con el plan de salud contratado, por cualquiera
+de los medios de comunicación indicados. Las comunicaciones dirigidas a mi correo electrónico surtirán
+efectos desde el momento en que sean recibidas en el servidor de mi cuenta de correo.</p>
+
+<p><b>Autorización para envío de planes de salud electrónicos.</b> Declaro expresamente y de manera
+previa que estoy de acuerdo con que Sanitas Perú EPS me envíe por medio electrónico el plan de salud
+contratado, los endosos y renovaciones futuras. La autenticidad e integridad del plan de salud se dará
+con el envío en PDF donde constará la firma electrónica del representante legal de Sanitas Perú EPS.</p>
+
+<p><b>Ley de Protección de Datos Personales.</b> El contratante/afiliado, de acuerdo a la Ley N° 29733 y
+su Reglamento (D.S. N° 003-2013-JUS), otorga su consentimiento libre, previo, informado, expreso e
+inequívoco para que Sanitas Perú S.A. EPS realice el tratamiento de los datos personales entregados al
+momento de celebrar el contrato de EPS, con la finalidad de ejecutar la relación contractual, así como
+para fines estadísticos, analíticos y de evaluación de calidad del servicio. Declara haber sido
+informado que la información podrá ser conservada, tratada y transferida durante la relación contractual
+y hasta diez años después de finalizada, y que puede ejercer sus derechos de acceso, rectificación,
+cancelación, oposición y revocación conforme a la normativa aplicable.</p>
+
+<p>El contratante/afiliado autoriza que Sanitas Perú EPS le remita información acerca de beneficios,
+productos o servicios por cualquier medio de comunicación. La no aceptación de esta autorización no
+afecta la prestación de los servicios contratados.</p>
+</div>
+
+<!-- ═══════════════════ FIRMA ═══════════════════ -->
+<div class="bloque-firma">
+    <div class="caja-firma">
+        {% if solicitud.ruta_firma %}
+        <img class="firma" src="{{ firma_base64_para_pdf }}" alt="Firma del titular">
+        {% endif %}
+        <div class="linea">
+            FIRMA DEL TITULAR<br>
+            {{ solicitud.titular_nombres or "" }} {{ solicitud.titular_apellido_paterno or "" }} {{ solicitud.titular_apellido_materno or "" }}<br>
+            {{ solicitud.titular_tipo_documento or "DNI" }} {{ solicitud.titular_num_documento or "" }}
+        </div>
+    </div>
+    <div class="caja-firma">
+        <div class="linea" style="margin-top: 59px;">
+            FECHA: {{ fecha_emision }}
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

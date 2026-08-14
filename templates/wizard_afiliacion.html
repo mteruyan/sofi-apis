@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Solicitud de Afiliación - Sanitas Perú</title>
+<style>
+:root {
+  --teal: #00A9B7;
+  --teal-dark: #007A87;
+  --navy: #003654;
+  --bg: #F4F7F9;
+  --white: #FFFFFF;
+  --gray: #6B7A82;
+  --border: #DCE4E8;
+  --danger: #D64545;
+  --success: #2E9E5B;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--navy);
+  margin: 0;
+  padding: 0;
+}
+.topbar {
+  background: linear-gradient(135deg, var(--navy), var(--teal-dark));
+  color: white;
+  padding: 16px 18px;
+}
+.topbar h1 { margin: 0; font-size: 18px; font-weight: 700; }
+.topbar .progreso { font-size: 12px; opacity: 0.85; margin-top: 4px; }
+.contenedor { max-width: 640px; margin: 0 auto; padding: 16px; padding-bottom: 90px; }
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.card h2 { font-size: 15px; color: var(--navy); margin: 0 0 4px; }
+.card .subtitulo { font-size: 12px; color: var(--gray); margin-bottom: 14px; }
+label {
+  display: block; font-size: 12px; font-weight: 600; color: var(--gray);
+  margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.3px;
+}
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 15px; background: var(--white); color: var(--navy);
+}
+.fila2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pregunta-salud {
+  border-bottom: 1px solid var(--border); padding: 10px 0;
+}
+.pregunta-salud:last-child { border-bottom: none; }
+.pregunta-salud .texto { font-size: 13px; margin-bottom: 6px; }
+.radio-sn { display: flex; gap: 16px; }
+.radio-sn label {
+  display: flex; align-items: center; gap: 6px; font-weight: 500;
+  text-transform: none; margin: 0; font-size: 13px; color: var(--navy);
+}
+.radio-sn input { width: auto; }
+.detalle-diagnostico {
+  display: none; background: #FAFCFD; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; margin-top: 8px;
+}
+.detalle-diagnostico.visible { display: block; }
+.persona-tab-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.persona-tab-btn {
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--white); font-size: 12px; font-weight: 600; cursor: pointer; color: var(--navy);
+}
+.persona-tab-btn.activo { background: var(--teal); color: white; border-color: var(--teal); }
+.persona-tab-btn.completo::after { content: " ✓"; color: var(--success); }
+.persona-panel { display: none; }
+.persona-panel-titulo {
+  font-size: 14px; font-weight: 700; color: var(--white); background: var(--teal-dark);
+  padding: 8px 12px; border-radius: 8px; margin: 0 0 12px;
+}
+.persona-panel.activo { display: block; }
+.pantalla { display: none; }
+.pantalla.activa { display: block; }
+button, .btn {
+  background: var(--teal); color: white; border: none; padding: 13px 20px;
+  border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%;
+}
+button:hover { background: var(--teal-dark); }
+button:disabled { background: #B7C6CC; cursor: not-allowed; }
+.btn-secundario { background: transparent; color: var(--teal-dark); border: 1px solid var(--teal); }
+.barra-botones {
+  position: fixed; bottom: 0; left: 0; right: 0; background: white;
+  border-top: 1px solid var(--border); padding: 12px 16px; display: flex; gap: 10px;
+}
+.barra-botones button { width: auto; flex: 1; }
+.texto-legal {
+  font-size: 11px; color: #555; text-align: justify; max-height: 220px;
+  overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 14px;
+}
+canvas#firmaCanvas {
+  border: 2px dashed var(--border); border-radius: 8px; width: 100%; height: 160px; touch-action: none;
+}
+.mensaje { padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; display: none; }
+.mensaje.error { background: #FBE9E7; color: var(--danger); display: block; }
+.mensaje.exito { background: #E7F6EC; color: var(--success); display: block; }
+.check-legal { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; font-size: 12px; }
+.check-legal input { width: auto; margin-top: 3px; }
+
+.doc-civil, .doc-conadis { margin-top: 4px; }
+.doc-estado { font-size: 12px; color: var(--gray); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1>Solicitud de Afiliación</h1>
+    <div class="progreso" id="textoProgreso">Paso 1 de 4</div>
+</div>
+
+<div class="contenedor">
+    <div class="mensaje" id="mensajeGlobal"></div>
+
+    <!-- ═══════════ PANTALLA 0: DATOS FALTANTES ═══════════ -->
+    <div class="pantalla {{ 'activa' if faltan_datos_basicos else '' }}" id="pantalla-datos">
+        <div class="card">
+            <h2>Antes de empezar</h2>
+            <div class="subtitulo">Estos datos no vienen en el DNI, complétalos para continuar.</div>
+
+            <label>Estado civil del titular</label>
+            <select id="input-titular-estado-civil">
+                <option value="">--</option>
+                <option value="SOLTERO" {{ 'selected' if titular_estado_civil == 'SOLTERO' else '' }}>Soltero</option>
+                <option value="CASADO" {{ 'selected' if titular_estado_civil == 'CASADO' else '' }}>Casado</option>
+                <option value="VIUDO" {{ 'selected' if titular_estado_civil == 'VIUDO' else '' }}>Viudo</option>
+                <option value="DIVORCIADO" {{ 'selected' if titular_estado_civil == 'DIVORCIADO' else '' }}>Divorciado</option>
+                <option value="CONVIVIENTE" {{ 'selected' if titular_estado_civil == 'CONVIVIENTE' else '' }}>Conviviente</option>
+            </select>
+
+            {% for p in personas %}
+            {% if not p.es_titular %}
+            <label>Estado civil de {{ p.nombre_completo or p.codigo }} ({{ p.parentesco }})</label>
+            <select class="input-dep-estado-civil" data-codigo="{{ p.codigo }}">
+                <option value="">--</option>
+                <option value="SOLTERO" {{ 'selected' if p.estado_civil == 'SOLTERO' else '' }}>Soltero</option>
+                <option value="CASADO" {{ 'selected' if p.estado_civil == 'CASADO' else '' }}>Casado</option>
+                <option value="VIUDO" {{ 'selected' if p.estado_civil == 'VIUDO' else '' }}>Viudo</option>
+                <option value="DIVORCIADO" {{ 'selected' if p.estado_civil == 'DIVORCIADO' else '' }}>Divorciado</option>
+                <option value="CONVIVIENTE" {{ 'selected' if p.estado_civil == 'CONVIVIENTE' else '' }}>Conviviente</option>
+            </select>
+            {% endif %}
+            {% endfor %}
+
+            <!-- Documento de estado civil: UNA sola vez por solicitud (no por persona).
+                 Si alguien en el grupo familiar está Casado y/o Conviviente, se pide
+                 el sustento respectivo una única vez. -->
+            <div class="doc-civil" id="doc-civil-PARTIDA_MATRIMONIO" style="display:none;">
+                <label>Partida de Matrimonio</label>
+                <input type="file" class="input-doc-civil" data-tipo="PARTIDA_MATRIMONIO" accept="image/*,application/pdf">
+                <div class="doc-estado" id="doc-civil-estado-PARTIDA_MATRIMONIO">
+                    {% for doc in documentos_civiles %}{% if doc.tipo == 'PARTIDA_MATRIMONIO' and doc.subido %}✓ Ya se subió este documento anteriormente.{% endif %}{% endfor %}
+                </div>
+            </div>
+            <div class="doc-civil" id="doc-civil-UNION_DE_HECHO" style="display:none;">
+                <label>Unión de Hecho</label>
+                <input type="file" class="input-doc-civil" data-tipo="UNION_DE_HECHO" accept="image/*,application/pdf">
+                <div class="doc-estado" id="doc-civil-estado-UNION_DE_HECHO">
+                    {% for doc in documentos_civiles %}{% if doc.tipo == 'UNION_DE_HECHO' and doc.subido %}✓ Ya se subió este documento anteriormente.{% endif %}{% endfor %}
+                </div>
+            </div>
+
+            <!-- Carné de CONADIS: uno por cada dependiente registrado como
+                 Hijo Incapacitado. Es obligatorio, no se comparte entre personas. -->
+            {% for doc in documentos_conadis %}
+            <div class="doc-conadis" id="doc-conadis-{{ doc.persona_codigo }}">
+                <label>Carné de CONADIS — {{ doc.nombre_completo or doc.persona_codigo }} ({{ doc.persona_codigo }})</label>
+                <input type="file" class="input-doc-conadis" data-codigo="{{ doc.persona_codigo }}" accept="image/*,application/pdf">
+                <div class="doc-estado" id="doc-conadis-estado-{{ doc.persona_codigo }}">
+                    {% if doc.subido %}✓ Ya se subió este documento anteriormente.{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ═══════════ PANTALLA 1: DECLARACIÓN DE SALUD ═══════════ -->
+    <div class="pantalla {{ '' if faltan_datos_basicos else 'activa' }}" id="pantalla-salud">
+        <div class="card">
+            <h2>Declaración de Salud</h2>
+            <div class="subtitulo">Responde por cada persona. Si respondes "Sí", detalla el diagnóstico.</div>
+
+            <div class="persona-tab-nav" id="tabs-salud"></div>
+
+            {% for p in personas %}
+            <div class="persona-panel" data-persona="{{ p.codigo }}" id="panel-salud-{{ p.codigo }}">
+                <h3 class="persona-panel-titulo">{{ 'Titular' if p.es_titular else p.codigo }} — {{ p.nombre_completo or p.codigo }}</h3>
+                <div class="fila2">
+                    <div>
+                        <label>Peso (kg)</label>
+                        <input type="number" class="input-peso" data-codigo="{{ p.codigo }}" min="1" max="300">
+                    </div>
+                    <div>
+                        <label>Talla (cm)</label>
+                        <input type="number" class="input-talla" data-codigo="{{ p.codigo }}" min="30" max="250">
+                    </div>
+                </div>
+
+                {% for pregunta in preguntas_salud %}
+                {% if not pregunta.solo_mujeres or p.sexo == 'F' %}
+                <div class="pregunta-salud" data-codigo="{{ p.codigo }}" data-pregunta="{{ pregunta.codigo }}">
+                    <div class="texto">{{ pregunta.codigo }} — {{ pregunta.texto }}</div>
+                    <div class="radio-sn">
+                        <label><input type="radio" name="resp-{{ p.codigo }}-{{ pregunta.codigo }}" value="N" checked> No</label>
+                        <label><input type="radio" name="resp-{{ p.codigo }}-{{ pregunta.codigo }}" value="S"> Sí</label>
+                    </div>
+                    <div class="detalle-diagnostico">
+                        <label>Diagnóstico</label>
+                        <input type="text" class="det-diagnostico">
+                        <label>Médico tratante</label>
+                        <input type="text" class="det-medico">
+                        <label>Fecha de diagnóstico</label>
+                        <input type="date" class="det-fecha">
+                        <label>Situación actual</label>
+                        <textarea class="det-situacion" rows="2"></textarea>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ═══════════ PANTALLA 2: ANTECEDENTES DE SEGURO ═══════════ -->
+    <div class="pantalla" id="pantalla-antecedentes">
+        <div class="card">
+            <h2>Antecedentes en el Sistema de Salud</h2>
+            <div class="subtitulo">¿Alguna vez tuvo o tiene otro seguro de salud?</div>
+
+            <div class="persona-tab-nav" id="tabs-antecedentes"></div>
+
+            {% for p in personas %}
+            <div class="persona-panel" data-persona="{{ p.codigo }}" id="panel-ant-{{ p.codigo }}">
+                <label>¿Tuvo o tiene otro seguro de salud?</label>
+                <div class="radio-sn">
+                    <label><input type="radio" name="tuvo-seguro-{{ p.codigo }}" value="N" checked> No</label>
+                    <label><input type="radio" name="tuvo-seguro-{{ p.codigo }}" value="S"> Sí</label>
+                </div>
+                <div class="detalle-diagnostico" id="detalle-seguro-{{ p.codigo }}">
+                    <label>Tipo</label>
+                    <select class="ant-tipo">
+                        <option value="EPS">EPS</option>
+                        <option value="PRIVADO">Privado</option>
+                        <option value="ESSALUD">EsSalud</option>
+                    </select>
+                    <label>Modalidad</label>
+                    <select class="ant-modalidad">
+                        <option value="COLECTIVO">Colectivo</option>
+                        <option value="INDIVIDUAL">Individual</option>
+                    </select>
+                    <label>Asegurador anterior</label>
+                    <select class="ant-asegurador-select">
+                        <option value="">-- Selecciona --</option>
+                        <option value="ESSALUD">EsSalud</option>
+                        <option value="MAPFRE">Mapfre</option>
+                        <option value="RIMAC">Rimac</option>
+                        <option value="PACIFICO">Pacífico</option>
+                        <option value="SANITAS">Sanitas</option>
+                        <option value="LA POSITIVA">La Positiva</option>
+                        <option value="OTROS">Otros</option>
+                    </select>
+                    <input type="text" class="ant-asegurador-texto" placeholder="Nombre de la clínica">
+                    <div class="fila2">
+                        <div>
+                            <label>Desde</label>
+                            <input type="date" class="ant-desde">
+                        </div>
+                        <div>
+                            <label>Hasta</label>
+                            <input type="date" class="ant-hasta">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ═══════════ PANTALLA 3: LEGALES + FIRMA ═══════════ -->
+    <div class="pantalla" id="pantalla-firma">
+        <div class="card">
+            <h2>Declaración jurada y firma</h2>
+            <div class="texto-legal">
+                Declaro que la información proporcionada en esta solicitud y la de mis derechohabientes
+                es veraz, legítima, actual, completa, precisa y pertinente. Sanitas Perú EPS se reserva
+                el derecho de calificar el riesgo en base a las respuestas contenidas en este documento.
+                Autorizo el tratamiento de mis datos personales conforme a la Ley N° 29733, y autorizo el
+                envío de comunicaciones y del plan de salud por medio electrónico.
+				
+				Para mantener la continuidad de cobertura de preexistencias en el plan de salud EPS, conforme a la Ley N.° 29561 y su Reglamento D.S. N.° 008-2012-SA, el titular declarara bajo juramento si estuvo o está cubierto por otro plan de salud EPS.
+
+				Si corresponde, deberá indicar el nombre de la EPS anterior y la fecha de cese de su último vínculo laboral.
+
+				La continuidad de la cobertura de preexistencias se activa con la presentación de esta declaración jurada. Asimismo, el titular autoriza a Sanitas Perú EPS a solicitar a su anterior EPS la información necesaria sobre:
+
+				- Condiciones, limitaciones y exclusiones de su plan anterior.
+				- Prestaciones de salud recibidas durante la vigencia del plan.
+				- Prestaciones correspondientes al titular y sus derechohabientes.
+
+			</div>
+            <div class="check-legal">
+                <input type="checkbox" id="check-declaracion">
+                <label for="check-declaracion">He leído y acepto la declaración jurada.</label>
+            </div>
+
+            <label>Firma del titular</label>
+            <canvas id="firmaCanvas"></canvas>
+            <button type="button" class="btn-secundario" id="btnLimpiarFirma" style="margin-top:8px;">Limpiar firma</button>
+        </div>
+    </div>
+</div>
+
+<div class="barra-botones">
+    <button type="button" class="btn-secundario" id="btnAtras">Atrás</button>
+    <button type="button" id="btnSiguiente">Siguiente</button>
+</div>
+
+<script>
+const TOKEN = "{{ token }}";
+const PERSONAS = {{ personas | tojson }};
+const API_BASE = window.location.origin;
+const PLAN_FIJO = "ADIC1"; // Plan interno por defecto; ya no se le pide al cliente elegirlo
+
+const PANTALLAS = {{ (['datos'] if faltan_datos_basicos else []) | tojson }}.concat(["salud", "antecedentes", "firma"]);
+let idxPantalla = 0;
+
+function mostrarMensaje(texto, tipo) {
+    const el = document.getElementById("mensajeGlobal");
+    el.textContent = texto;
+    el.className = "mensaje " + tipo;
+    window.scrollTo({top: 0, behavior: "smooth"});
+}
+function ocultarMensaje() {
+    document.getElementById("mensajeGlobal").className = "mensaje";
+}
+
+function irAPantalla(nombre) {
+    document.querySelectorAll(".pantalla").forEach(p => p.classList.remove("activa"));
+    document.getElementById("pantalla-" + nombre).classList.add("activa");
+    idxPantalla = PANTALLAS.indexOf(nombre);
+    document.getElementById("textoProgreso").textContent = `Paso ${idxPantalla + 1} de ${PANTALLAS.length}`;
+    document.getElementById("btnAtras").style.visibility = idxPantalla === 0 ? "hidden" : "visible";
+    document.getElementById("btnSiguiente").textContent = idxPantalla === PANTALLAS.length - 1 ? "Finalizar" : "Siguiente";
+
+    if (nombre === "firma" && !canvasInicializado) {
+        canvasInicializado = true;
+        requestAnimationFrame(ajustarCanvas);
+    }
+}
+
+// ── Tabs por persona (declaración de salud y antecedentes) ──
+function construirTabs(contenedorId, prefijoPanel) {
+    const contenedor = document.getElementById(contenedorId);
+    contenedor.innerHTML = "";
+    PERSONAS.forEach((p, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "persona-tab-btn" + (i === 0 ? " activo" : "");
+        btn.textContent = p.codigo === "T" ? "Titular" : p.codigo;
+        btn.onclick = () => {
+            contenedor.querySelectorAll(".persona-tab-btn").forEach(b => b.classList.remove("activo"));
+            btn.classList.add("activo");
+            document.querySelectorAll(`#pantalla-${prefijoPanel === 'salud-' ? 'salud' : 'antecedentes'} .persona-panel`).forEach(pnl => pnl.classList.remove("activo"));
+            document.getElementById(prefijoPanel + p.codigo).classList.add("activo");
+        };
+        contenedor.appendChild(btn);
+    });
+    // Activar el primero
+    const primerPanel = document.getElementById(prefijoPanel + PERSONAS[0].codigo);
+    if (primerPanel) primerPanel.classList.add("activo");
+}
+construirTabs("tabs-salud", "panel-salud-");
+construirTabs("tabs-antecedentes", "panel-ant-");
+
+
+// ── Documento de estado civil: UNO SOLO por tipo para toda la solicitud ──
+// (si el titular y/o algún dependiente son Casado/Conviviente, el sustento
+// se pide una única vez, no uno por persona).
+const ETIQUETA_DOC_CIVIL = {
+    PARTIDA_MATRIMONIO: "Partida de Matrimonio",
+    UNION_DE_HECHO: "Unión de Hecho",
+};
+const ESTADO_A_TIPO_DOC = {
+    CASADO: "PARTIDA_MATRIMONIO",
+    CONVIVIENTE: "UNION_DE_HECHO",
+};
+const documentosCivilesPendientes = {};  // { tipo: base64 } -- listos para enviar
+const documentosCivilesYaSubidos = new Set(
+    ({{ documentos_civiles | tojson }}).filter(d => d.subido).map(d => d.tipo)
+);
+
+function obtenerTiposCivilesRequeridos() {
+    const estados = [document.getElementById("input-titular-estado-civil").value];
+    document.querySelectorAll(".input-dep-estado-civil").forEach(sel => estados.push(sel.value));
+    const tipos = new Set();
+    estados.forEach(e => { if (ESTADO_A_TIPO_DOC[e]) tipos.add(ESTADO_A_TIPO_DOC[e]); });
+    return tipos;
+}
+
+function actualizarBloquesDocCivil() {
+    const tiposRequeridos = obtenerTiposCivilesRequeridos();
+    Object.keys(ETIQUETA_DOC_CIVIL).forEach(tipo => {
+        const bloque = document.getElementById("doc-civil-" + tipo);
+        const estadoEl = document.getElementById("doc-civil-estado-" + tipo);
+        if (!bloque) return;
+
+        if (!tiposRequeridos.has(tipo)) {
+            bloque.style.display = "none";
+            delete documentosCivilesPendientes[tipo];
+            return;
+        }
+        bloque.style.display = "block";
+
+        if (documentosCivilesPendientes[tipo]) {
+            estadoEl.textContent = "✓ Archivo listo para enviar.";
+        } else if (documentosCivilesYaSubidos.has(tipo)) {
+            estadoEl.textContent = "✓ Ya se subió este documento anteriormente.";
+        } else {
+            estadoEl.textContent = "";
+        }
+    });
+}
+
+// ── Carné de CONADIS: uno por cada dependiente Hijo Incapacitado (no se comparte) ──
+const DOCUMENTOS_CONADIS = {{ documentos_conadis | tojson }};
+const documentosConadisPendientes = {};  // { persona_codigo: base64 } -- listos para enviar
+const documentosConadisYaSubidos = new Set(
+    DOCUMENTOS_CONADIS.filter(d => d.subido).map(d => d.persona_codigo)
+);
+
+document.querySelectorAll(".input-doc-conadis").forEach(input => {
+    input.addEventListener("change", async () => {
+        const codigo = input.dataset.codigo;
+        if (!input.files.length) return;
+        const base64 = await leerArchivoComoBase64(input.files[0]);
+        documentosConadisPendientes[codigo] = base64;
+        const estadoEl = document.getElementById("doc-conadis-estado-" + codigo);
+        if (estadoEl) estadoEl.textContent = "✓ Archivo listo para enviar.";
+    });
+});
+
+function leerArchivoComoBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+document.querySelectorAll(".input-doc-civil").forEach(input => {
+    input.addEventListener("change", async () => {
+        const tipo = input.dataset.tipo;
+        if (!input.files.length) return;
+        const base64 = await leerArchivoComoBase64(input.files[0]);
+        documentosCivilesPendientes[tipo] = base64;
+        actualizarBloquesDocCivil();
+    });
+});
+
+document.getElementById("input-titular-estado-civil").addEventListener("change", actualizarBloquesDocCivil);
+document.querySelectorAll(".input-dep-estado-civil").forEach(sel => {
+    sel.addEventListener("change", actualizarBloquesDocCivil);
+});
+
+// Mostrar/ocultar bloques según lo que ya venía precargado del DNI
+actualizarBloquesDocCivil();
+
+// ── Validación: no dejar avanzar la pantalla "datos" con campos vacíos ──
+// Sexo y ubigeo ya NO se validan aquí: se obtienen de la foto del DNI/CE
+// al registrar a cada persona, no se piden manualmente en el wizard.
+function validarPantallaDatos() {
+    const faltantes = [];
+
+    const estadoCivilTitular = document.getElementById("input-titular-estado-civil").value;
+    if (!estadoCivilTitular) faltantes.push("Estado civil del titular");
+
+    PERSONAS.filter(p => !p.es_titular).forEach(p => {
+        const nombreP = p.nombre_completo || p.codigo;
+        const selEstadoCivil = document.querySelector(`.input-dep-estado-civil[data-codigo="${p.codigo}"]`);
+        if (selEstadoCivil && !selEstadoCivil.value) faltantes.push(`Estado civil de ${nombreP}`);
+    });
+
+    // Documento civil: se exige una sola vez por tipo requerido en todo el grupo familiar
+    obtenerTiposCivilesRequeridos().forEach(tipo => {
+        if (!documentosCivilesPendientes[tipo] && !documentosCivilesYaSubidos.has(tipo)) {
+            faltantes.push(ETIQUETA_DOC_CIVIL[tipo]);
+        }
+    });
+
+    // Carné de CONADIS: obligatorio por cada dependiente Hijo Incapacitado
+    DOCUMENTOS_CONADIS.forEach(doc => {
+        if (!documentosConadisPendientes[doc.persona_codigo] && !documentosConadisYaSubidos.has(doc.persona_codigo)) {
+            faltantes.push(`Carné de CONADIS de ${doc.nombre_completo || doc.persona_codigo}`);
+        }
+    });
+
+    if (faltantes.length > 0) {
+        throw new Error("Completa lo siguiente antes de continuar: " + faltantes.join(", "));
+    }
+}
+
+async function subirDocumentosCivilesPendientes() {
+    for (const tipo of Object.keys(documentosCivilesPendientes)) {
+        const base64 = documentosCivilesPendientes[tipo];
+        await llamarAPI("/afiliacion/guardar-documento-civil", {
+            token: TOKEN, persona_codigo: "T", tipo_documento: tipo, archivo_base64: base64,
+        });
+        documentosCivilesYaSubidos.add(tipo);
+    }
+}
+
+async function subirDocumentosConadisPendientes() {
+    for (const codigo of Object.keys(documentosConadisPendientes)) {
+        const base64 = documentosConadisPendientes[codigo];
+        await llamarAPI("/afiliacion/guardar-documento-civil", {
+            token: TOKEN, persona_codigo: codigo, tipo_documento: "CARNET_CONADIS", archivo_base64: base64,
+        });
+        documentosConadisYaSubidos.add(codigo);
+    }
+}
+
+// ── Mostrar/ocultar detalle de diagnóstico según S/N ──
+document.querySelectorAll(".pregunta-salud").forEach(bloque => {
+    bloque.querySelectorAll("input[type=radio]").forEach(radio => {
+        radio.addEventListener("change", () => {
+            const detalle = bloque.querySelector(".detalle-diagnostico");
+            detalle.classList.toggle("visible", radio.value === "S" && radio.checked);
+        });
+    });
+});
+document.querySelectorAll('[name^="tuvo-seguro-"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+        const codigo = radio.name.replace("tuvo-seguro-", "");
+        document.getElementById("detalle-seguro-" + codigo).classList.toggle("visible", radio.value === "S" && radio.checked);
+    });
+});
+
+// ── Asegurador anterior: cambia de comportamiento según el Tipo elegido ──
+function ajustarAseguradorSegunTipo(panel) {
+    const tipo = panel.querySelector(".ant-tipo").value;
+    const select = panel.querySelector(".ant-asegurador-select");
+    const texto = panel.querySelector(".ant-asegurador-texto");
+
+    if (tipo === "EPS") {
+        select.style.display = "";
+        select.disabled = false;
+        if (select.value === "") select.value = "";
+        texto.style.display = "none";
+        texto.value = "";
+    } else if (tipo === "ESSALUD") {
+        select.style.display = "none";
+        texto.style.display = "";
+        texto.value = "NINGUNO";
+        texto.readOnly = true;
+    } else if (tipo === "PRIVADO") {
+        select.style.display = "none";
+        texto.style.display = "";
+        texto.readOnly = false;
+        if (texto.value === "NINGUNO") texto.value = "";
+    }
+}
+
+document.querySelectorAll(".ant-tipo").forEach(select => {
+    const panel = select.closest(".persona-panel");
+    ajustarAseguradorSegunTipo(panel); // estado inicial
+    select.addEventListener("change", () => ajustarAseguradorSegunTipo(panel));
+});
+
+// ── Firma (canvas) ──
+const canvas = document.getElementById("firmaCanvas");
+const ctx = canvas.getContext("2d");
+function ajustarCanvas() {
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * ratio;
+    canvas.height = canvas.offsetHeight * ratio;
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#003654";
+}
+let canvasInicializado = false;
+let dibujando = false;
+function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return {x: p.clientX - r.left, y: p.clientY - r.top};
+}
+canvas.addEventListener("mousedown", e => { dibujando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+canvas.addEventListener("mousemove", e => { if (dibujando) { const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); } });
+canvas.addEventListener("mouseup", () => dibujando = false);
+canvas.addEventListener("touchstart", e => { dibujando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); });
+canvas.addEventListener("touchmove", e => { if (dibujando) { const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); } e.preventDefault(); });
+canvas.addEventListener("touchend", () => dibujando = false);
+document.getElementById("btnLimpiarFirma").onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+// ── Recolectar datos de cada pantalla ──
+function recolectarDatosFaltantes() {
+    const depMap = {};
+    document.querySelectorAll(".input-dep-estado-civil").forEach(sel => {
+        if (sel.value) {
+            const cod = sel.dataset.codigo;
+            depMap[cod] = depMap[cod] || {codigo: cod};
+            depMap[cod].estado_civil = sel.value;
+        }
+    });
+    return {
+        token: TOKEN,
+        plan: PLAN_FIJO,
+        titular_estado_civil: document.getElementById("input-titular-estado-civil").value || null,
+        dependientes: Object.values(depMap),
+    };
+}
+
+function recolectarDeclaracionSalud(codigoPersona) {
+    const respuestas = {};
+    const diagnosticos = [];
+    let pesoKg = null, tallaCm = null;
+
+    const inputPeso = document.querySelector(`.input-peso[data-codigo="${codigoPersona}"]`);
+    const inputTalla = document.querySelector(`.input-talla[data-codigo="${codigoPersona}"]`);
+    if (inputPeso && inputPeso.value) pesoKg = inputPeso.value;
+    if (inputTalla && inputTalla.value) tallaCm = inputTalla.value;
+
+    document.querySelectorAll(`.pregunta-salud[data-codigo="${codigoPersona}"]`).forEach(bloque => {
+        const preguntaCodigo = bloque.dataset.pregunta;
+        const seleccionado = bloque.querySelector("input[type=radio]:checked");
+        const valor = seleccionado ? seleccionado.value : "N";
+        respuestas[preguntaCodigo] = valor;
+        if (valor === "S") {
+            diagnosticos.push({
+                pregunta_codigo: preguntaCodigo,
+                diagnostico: bloque.querySelector(".det-diagnostico").value,
+                extremidad: "N/A",
+                medico_tratante: bloque.querySelector(".det-medico").value,
+                fecha_diagnostico: bloque.querySelector(".det-fecha").value || null,
+                situacion_actual: bloque.querySelector(".det-situacion").value,
+            });
+        }
+    });
+
+    return {
+        token: TOKEN, persona_codigo: codigoPersona,
+        peso_kg: pesoKg, talla_cm: tallaCm, respuestas, diagnosticos,
+    };
+}
+
+function recolectarAntecedentes(codigoPersona, nombrePersona) {
+    const radio = document.querySelector(`input[name="tuvo-seguro-${codigoPersona}"]:checked`);
+    const tuvo = radio ? radio.value === "S" : false;
+    const panel = document.getElementById("detalle-seguro-" + codigoPersona);
+    const registros = [];
+
+    if (tuvo) {
+        const tipo = panel.querySelector(".ant-tipo").value;
+        const modalidad = panel.querySelector(".ant-modalidad").value;
+        const asegurador = tipo === "EPS"
+            ? panel.querySelector(".ant-asegurador-select").value.trim()
+            : panel.querySelector(".ant-asegurador-texto").value.trim();
+        const desde = panel.querySelector(".ant-desde").value;
+        const hasta = panel.querySelector(".ant-hasta").value;
+
+        const faltantes = [];
+        if (!tipo) faltantes.push("Tipo");
+        if (!modalidad) faltantes.push("Modalidad");
+        if (!asegurador) faltantes.push("Asegurador anterior");
+        if (!desde) faltantes.push("Desde");
+        if (!hasta) faltantes.push("Hasta");
+
+        if (faltantes.length > 0) {
+            throw new Error(
+                `${nombrePersona || codigoPersona}: completa ${faltantes.join(", ")} en Antecedentes de Seguro, o marca "No" si no tuvo seguro anterior.`
+            );
+        }
+
+        registros.push({
+            tuvo_seguro: true,
+            tipo_seguro: tipo,
+            modalidad: modalidad,
+            asegurador_anterior: asegurador,
+            fecha_desde: desde,
+            fecha_hasta: hasta,
+        });
+    }
+    return {token: TOKEN, persona_codigo: codigoPersona, registros};
+}
+
+async function llamarAPI(ruta, payload) {
+    const resp = await fetch(API_BASE + ruta, {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Error desconocido");
+    return data;
+}
+
+// ── Validación: si se marcó "Sí" en una pregunta de salud, exigir el detalle completo ──
+function validarPantallaSalud() {
+    const faltantes = [];
+
+    PERSONAS.forEach(p => {
+        const nombreP = (p.es_titular ? "Titular" : p.codigo) + (p.nombre_completo ? ` (${p.nombre_completo})` : "");
+
+        document.querySelectorAll(`.pregunta-salud[data-codigo="${p.codigo}"]`).forEach(bloque => {
+            const seleccionado = bloque.querySelector("input[type=radio]:checked");
+            if (!seleccionado || seleccionado.value !== "S") return;
+
+            const preguntaCodigo = bloque.dataset.pregunta;
+            const diagnostico = bloque.querySelector(".det-diagnostico").value.trim();
+            const medico = bloque.querySelector(".det-medico").value.trim();
+            const fecha = bloque.querySelector(".det-fecha").value;
+            const situacion = bloque.querySelector(".det-situacion").value.trim();
+
+            const camposFaltantes = [];
+            if (!diagnostico) camposFaltantes.push("Diagnóstico");
+            if (!medico) camposFaltantes.push("Médico tratante");
+            if (!fecha) camposFaltantes.push("Fecha de diagnóstico");
+            if (!situacion) camposFaltantes.push("Situación actual");
+
+            if (camposFaltantes.length > 0) {
+                faltantes.push(`${nombreP} — pregunta ${preguntaCodigo}: completa ${camposFaltantes.join(", ")}`);
+            }
+        });
+    });
+
+    if (faltantes.length > 0) {
+        throw new Error("Completa lo siguiente antes de continuar: " + faltantes.join(" | "));
+    }
+}
+
+async function guardarPantallaActual() {
+    const nombre = PANTALLAS[idxPantalla];
+
+    if (nombre === "datos") {
+        validarPantallaDatos();
+        await llamarAPI("/afiliacion/completar-datos", recolectarDatosFaltantes());
+        await subirDocumentosCivilesPendientes();
+        await subirDocumentosConadisPendientes();
+    }
+
+    if (nombre === "salud") {
+        validarPantallaSalud();
+        for (const p of PERSONAS) {
+            await llamarAPI("/afiliacion/guardar-declaracion-salud", recolectarDeclaracionSalud(p.codigo));
+        }
+    }
+
+    if (nombre === "antecedentes") {
+        const payloads = PERSONAS.map(p => recolectarAntecedentes(p.codigo, p.nombre_completo));
+        for (const payload of payloads) {
+            await llamarAPI("/afiliacion/guardar-antecedentes-seguro", payload);
+        }
+    }
+
+    if (nombre === "firma") {
+        if (!document.getElementById("check-declaracion").checked) {
+            throw new Error("Debes aceptar la declaración jurada.");
+        }
+        const firmaVacia = !ctx.getImageData(0, 0, canvas.width, canvas.height).data.some(v => v !== 0);
+        if (firmaVacia) throw new Error("Falta la firma del titular.");
+
+        const firmaBase64 = canvas.toDataURL("image/png");
+        await llamarAPI("/afiliacion/guardar-firma", {token: TOKEN, firma_base64: firmaBase64});
+        await llamarAPI("/afiliacion/finalizar", {token: TOKEN});
+    }
+}
+
+document.getElementById("btnSiguiente").addEventListener("click", async () => {
+    ocultarMensaje();
+    const boton = document.getElementById("btnSiguiente");
+    boton.disabled = true;
+    const textoOriginal = boton.textContent;
+    boton.textContent = "Guardando...";
+
+    try {
+        await guardarPantallaActual();
+
+        if (idxPantalla === PANTALLAS.length - 1) {
+            document.querySelector(".contenedor").innerHTML =
+                '<div class="card"><h2>¡Listo!</h2><p>Tu solicitud fue registrada correctamente. Te enviamos una copia por correo.</p></div>';
+            document.querySelector(".barra-botones").style.display = "none";
+        } else {
+            irAPantalla(PANTALLAS[idxPantalla + 1]);
+        }
+    } catch (e) {
+        mostrarMensaje(e.message, "error");
+    } finally {
+        boton.disabled = false;
+        boton.textContent = textoOriginal;
+    }
+});
+
+document.getElementById("btnAtras").addEventListener("click", () => {
+    ocultarMensaje();
+    if (idxPantalla > 0) irAPantalla(PANTALLAS[idxPantalla - 1]);
+});
+
+// Inicializar en la primera pantalla de la secuencia
+irAPantalla(PANTALLAS[0]);
+</script>
+
+</body>
+</html>

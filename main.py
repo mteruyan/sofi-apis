@@ -25,14 +25,23 @@ from google.cloud import storage
 storage_client = storage.Client()
 from weasyprint import HTML
 
+import uuid
+import random
+import string
+import zipfile
 
-
+import google.auth
+from google.auth.transport import requests as google_auth_requests
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+from io import BytesIO
 
 from flask import send_from_directory
 from sctr_forms import handle_sctr_form, handle_sctr_submit, handle_sctr_crear_grupo
 from sctr_whatsapp import handle_sctr_resumen_whatsapp, handle_sctr_excel_whatsapp, handle_sctr_borrar_empleado, handle_sctr_excel_web
 from admision_forms import handle_admision_sctr_nuevo, handle_admision_sctr_continuidad, handle_admision_eps_nuevo
 from agente_consulta import (handle_consulta_agente, handle_agente_kb_upsert, handle_agente_kb_listar, handle_agente_kb_form_web, handle_agente_kb_perfil)
+from crypto_utils import cifrar, descifrar, cifrar_json, descifrar_json
 
 # ─────────────────────────────────────────────
 # VARIABLES
@@ -294,6 +303,7 @@ def api(request):
         and not request.path.startswith("/programa-cronico/firmar-consentimiento") \
         and not request.path.startswith("/programa-cronico/mantenimiento") \
         and not (request.path.startswith("/programa-cronico/") and request.method == "GET") \
+        and not (request.path.startswith("/afiliacion/") and request.path != "/afiliacion/iniciar") \
         and not validar_api_key(request):
         return (json.dumps({"error": "API Key invalida"}), 401, HEADERS)
 
@@ -391,6 +401,38 @@ def api(request):
         return handle_excel_rechazados(request)
     elif path == "/sctr/crear_grupo":
         return handle_sctr_crear_grupo(request)
+    elif path == "/afiliacion/iniciar":
+        return handle_iniciar_afiliacion(request)
+    elif path == "/afiliacion/consulta-ruc":
+        return handle_consulta_ruc_afiliacion(request)
+    elif path == "/afiliacion/registrar-titular":
+        return handle_registrar_titular_afiliacion(request)
+    elif path == "/afiliacion/ocr-documento":
+        return handle_ocr_documento_afiliacion(request)
+    elif path == "/afiliacion/guardar-paso":
+        return handle_guardar_paso_afiliacion(request)
+    elif path == "/afiliacion/guardar-declaracion-salud":
+        return handle_guardar_declaracion_salud(request)
+    elif path == "/afiliacion/guardar-antecedentes-seguro":
+        return handle_guardar_antecedentes_seguro(request)
+    elif path == "/afiliacion/guardar-firma":
+        return handle_guardar_firma_afiliacion(request)
+    elif path == "/afiliacion/finalizar":
+        return handle_finalizar_afiliacion(request)
+    elif path == "/afiliacion/estado":
+        return handle_consultar_estado_afiliacion(request)
+    elif path == "/afiliacion/completar-datos":
+        return handle_completar_datos_afiliacion(request)
+    elif path == "/afiliacion/registrar-dependiente":
+        return handle_registrar_dependiente_afiliacion(request)
+    elif path == "/afiliacion/guardar-documento-civil":
+        return handle_guardar_documento_civil_afiliacion(request)
+    elif path == "/afiliacion/reenviar-sms" and request.method == "POST":
+        return handle_reenviar_sms_afiliacion(request)
+    elif path == "/afiliacion/reporte" and request.method == "GET":
+        return handle_reporte_afiliacion(request)
+    elif path == "/afiliacion/reporte-excel" and request.method == "GET":
+        return handle_reporte_excel_afiliacion(request)
     elif path == "/programa-cronico/reenviar-danaconnect":
         return handle_reenviar_danaconnect(request)
     elif path == "/sctr/whatsapp/resumen" and request.method == "POST":
@@ -466,7 +508,10 @@ def api(request):
     elif path.startswith("/assets/"):
         filename = path.split("/assets/")[1]
         return handle_static_assets(filename)
-
+    elif request.path.startswith("/afiliacion/") and request.method == "GET":
+        token = request.path.rstrip("/").split("/afiliacion/")[1]
+        return handle_ver_wizard_afiliacion(request, token)
+    
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
 # ─────────────────────────────────────────────
@@ -2320,18 +2365,63 @@ def handle_busca_actividad(request):
 # ─────────────────────────────────────────────
 # API: /busca-carta-rechazada
 # ─────────────────────────────────────────────
-def safe_read_csv(url, tries=3, delay=1):
+def safe_read_csv(url, tries=3, delay=2):
     import time
-    while tries > 0:
+    import requests
+
+    for intento in range(1, tries + 1):
         try:
-            response = requests.get(url, timeout=10)
+            print(f"[CSV] Intento {intento}/{tries}")
+            print(f"[CSV] URL: {url}")
+
+            response = requests.get(
+                url,
+                timeout=(10, 60),  # 10s conexión / 60s lectura
+                allow_redirects=True,
+                headers={
+                    "User-Agent": "Mozilla/5.0"
+                }
+            )
+
+            print(f"[CSV] HTTP Status: {response.status_code}")
+            print(f"[CSV] Content-Type: {response.headers.get('content-type')}")
+            print(f"[CSV] Tamaño: {len(response.content)} bytes")
+            print(f"[CSV] URL final: {response.url}")
+
             if response.status_code == 200:
-                response.encoding = 'utf-8'
-                return response.text.splitlines()
-        except Exception:
-            pass
-        time.sleep(delay)
-        tries -= 1
+                response.encoding = "utf-8"
+
+                lines = response.text.splitlines()
+
+                print(f"[CSV] Líneas recibidas: {len(lines)}")
+
+                return lines
+
+            print(
+                f"[CSV] Google respondió HTTP {response.status_code}"
+            )
+
+        except requests.exceptions.ConnectTimeout as e:
+            print(f"[CSV] Timeout de conexión: {e}")
+
+        except requests.exceptions.ReadTimeout as e:
+            print(f"[CSV] Timeout esperando respuesta: {e}")
+
+        except requests.exceptions.ConnectionError as e:
+            print(f"[CSV] Error de conexión: {e}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"[CSV] Error de requests: {e}")
+
+        except Exception as e:
+            print(f"[CSV] Error inesperado: {type(e).__name__}: {e}")
+
+        if intento < tries:
+            print(f"[CSV] Esperando {delay} segundos...")
+            time.sleep(delay)
+
+    print("[CSV] No se pudo obtener el CSV después de todos los intentos.")
+
     return None
 
 
@@ -2717,7 +2807,14 @@ def lee_excel_rechazados():
     dias_atras = 2 if ahora.isoweekday() == 1 else 1
     ayer = (ahora - timedelta(days=dias_atras)).strftime("%d/%m/%Y")
 
-    url = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=577147525&single=true&output=csv&t={int(time.time())}"
+    #url = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=577147525&single=true&output=csv&t={int(time.time())}"
+    url = (
+        "https://docs.google.com/spreadsheets/d/"
+        "1dJdYBQqzjilP7SXLsb6OSgi_wOqn8DrxfiQ6-OtNcM8"
+        "/gviz/tq?tqx=out:csv"
+        "&gid=577147525"
+        f"&t={int(time.time())}"
+        )
 
     lines = safe_read_csv(url)
     if not lines:
@@ -5917,7 +6014,8 @@ def extraer_datos_dni(bytes_anverso, mime_anverso, bytes_reverso=None, mime_reve
         return {
             "tipo_documento": None, "n_documento": None, "nombres": None, "apellidos": None,
             "fecha_nacimiento": None, "domicilio": None, "distrito": None,
-            "provincia": None, "departamento": None,
+            "provincia": None, "departamento": None, "sexo": None, "estado_civil": None,
+            "nacionalidad": None,
             "error": "No se pudo leer texto del documento"
         }
 
@@ -5933,10 +6031,15 @@ Formato exacto:
   "nombres": "nombres del titular en mayúsculas o null",
   "apellidos": "apellidos del titular (paterno y materno juntos) en mayúsculas o null",
   "fecha_nacimiento": "YYYY-MM-DD o null si no se encuentra",
+  "sexo": "M o F, según lo impreso en el documento (campo 'SEXO'), o null si no se encuentra",
+  "estado_civil": "uno de: SOLTERO, CASADO, VIUDO, DIVORCIADO, CONVIVIENTE -- SOLO si aparece
+    impreso explícitamente en el documento (algunos DNI antiguos lo traen, el DNI electrónico
+    actual normalmente NO). Si no aparece impreso, responde null; NO lo infieras ni lo asumas.",
   "domicilio": "dirección completa impresa en el reverso del documento (calle, número, urbanización) o null si no aparece",
   "distrito": "nombre del distrito de residencia, en formato Título (ej. Santiago De Surco), o null",
   "provincia": "nombre de la provincia de residencia, en formato Título, o null",
-  "departamento": "nombre del departamento de residencia, en formato Título, o null"
+  "departamento": "nombre del departamento de residencia, en formato Título, o null",
+  "nacionalidad": "código de 3 letras impreso en el documento tal como aparece (ej. PER, VEN, COL, ECU), o null si no se encuentra"
 }}
 
 Pistas para identificar el tipo de documento: si el texto menciona "DOCUMENTO NACIONAL DE
@@ -5946,6 +6049,9 @@ es CE. Si menciona "PASSPORT" o "PASAPORTE", es Pasaporte. Si no hay indicios cl
 El documento suele traer una línea "Departamento/Provincia/Distrito" seguida de los tres
 valores en ese orden separados por "/". Úsala para completar distrito, provincia y departamento
 por separado.
+
+El campo de nacionalidad suele aparecer como un código de 3 letras (ej. "PER" para peruano).
+Transcríbelo tal cual está impreso, sin traducirlo ni expandirlo.
 
 Texto extraído del documento:
 {texto_crudo}
@@ -5959,7 +6065,14 @@ Texto extraído del documento:
     except json.JSONDecodeError:
         datos = {"tipo_documento": None, "n_documento": None, "nombres": None, "apellidos": None,
                  "fecha_nacimiento": None, "domicilio": None, "distrito": None,
-                 "provincia": None, "departamento": None}
+                 "provincia": None, "departamento": None, "sexo": None, "estado_civil": None,
+                 "nacionalidad": None}
+
+    # Asegura que las claves nuevas siempre existan aunque Gemini no las devuelva
+    # (retrocompatibilidad: programa-cronico usa esta misma función y no las usa)
+    datos.setdefault("sexo", None)
+    datos.setdefault("estado_civil", None)
+    datos.setdefault("nacionalidad", None)
 
     return datos
 
@@ -7068,38 +7181,2472 @@ def handle_mantenimiento_contacto_cronico(request):
 # ────────────────────────────────────────────────────────────────────────────────────
 # API: Afiliacion a titulares y dependientes con imagen de su documento de identidad
 # ────────────────────────────────────────────────────────────────────────────────────
+MAPA_NACIONALIDADES = {
+    "AFG": "Afganistán", "ALB": "Albania", "DEU": "Alemania", "AND": "Andorra",
+    "AGO": "Angola", "AIA": "Anguila", "ATA": "Antártida", "ATG": "Antigua y Barbuda",
+    "ANT": "Antillas Holandesas", "SAU": "Arabia Saudita", "DZA": "Argelia", "ARG": "Argentina",
+    "ARM": "Armenia", "ABW": "Aruba", "AUS": "Australia", "AUT": "Austria",
+    "AZE": "Azerbaiyán", "BHS": "Bahamas", "BHR": "Bahrein", "BGD": "Bangladesh",
+    "BRB": "Barbados", "BLR": "Belarús", "BEL": "Bélgica", "BLZ": "Belice",
+    "BEN": "Benin", "BMU": "Bermuda", "BOL": "Bolivia", "BES": "Bonaire, San Eustaquio y Saba",
+    "BIH": "Bosnia y Herzegovina", "BWA": "Botswana", "BRA": "Brasil", "BRN": "Brunei Darussalam",
+    "BGR": "Bulgaria", "BFA": "Burkina Faso", "BDI": "Burundi", "BTN": "Bután",
+    "CPV": "Cabo Verde", "KHM": "Camboya", "CMR": "Camerún", "CAN": "Canadá",
+    "TCD": "Chad", "CHL": "Chile", "CHN": "China", "CYP": "Chipre",
+    "VAT": "Ciudad del Vaticano", "COL": "Colombia", "COG": "Congo (Brazzaville)", "COD": "Congo RD",
+    "PRK": "Corea del Norte", "KOR": "Corea del Sur", "CIV": "Costa de Marfil", "CRI": "Costa Rica",
+    "HRV": "Croacia", "CUB": "Cuba", "CUW": "Curaçao", "DNK": "Dinamarca",
+    "DMA": "Dominica", "ECU": "Ecuador", "EGY": "Egipto", "SLV": "El Salvador",
+    "ARE": "Emiratos Árabes Unidos", "ERI": "Eritrea", "SVK": "Eslovaquia", "SVN": "Eslovenia",
+    "ESP": "España", "USA": "Estados Unidos", "UMI": "Estados Unidos (Islas Menores Alejadas)", "EST": "Estonia",
+    "ETH": "Etiopía", "PHL": "Filipinas", "FIN": "Finlandia", "FJI": "Fiyi",
+    "FRA": "Francia", "GAB": "Gabón", "GMB": "Gambia", "GEO": "Georgia",
+    "SGS": "Georgia del Sur e Islas Sandwich", "GHA": "Ghana", "GIB": "Gibraltar", "GRD": "Granada",
+    "GRC": "Grecia", "GRL": "Groenlandia", "GLP": "Guadalupe", "GUM": "Guam",
+    "GTM": "Guatemala", "GUY": "Guayana", "GUF": "Guayana Francesa", "GGY": "Guernesey",
+    "GIN": "Guinea", "GNQ": "Guinea Ecuatorial", "GNB": "Guinea-Bissau", "HTI": "Haití",
+    "HND": "Honduras", "HKG": "Hong Kong", "HUN": "Hungría", "IND": "India",
+    "IDN": "Indonesia", "IRQ": "Irak", "IRN": "Irán", "IRL": "Irlanda",
+    "BVT": "Isla Bouvet", "IMN": "Isla de Man", "CXR": "Isla de Navidad", "NFK": "Isla Norfolk",
+    "ISL": "Islandia", "ALA": "Islas Åland", "CYM": "Islas Caimán", "CCK": "Islas Cocos (Keeling)",
+    "COM": "Islas Comoros", "COK": "Islas Cook", "FRO": "Islas Feroe", "HMD": "Islas Heard y McDonald",
+    "FLK": "Islas Malvinas (Falkland)", "MNP": "Islas Marianas del Norte", "MHL": "Islas Marshall", "PCN": "Islas Pitcairn",
+    "SLB": "Islas Salomón", "TCA": "Islas Turcas y Caicos", "VGB": "Islas Vírgenes Británicas", "VIR": "Islas Vírgenes de EE.UU.",
+    "ISR": "Israel", "ITA": "Italia", "JAM": "Jamaica", "JPN": "Japón",
+    "JEY": "Jersey", "JOR": "Jordania", "KAZ": "Kazajstán", "KEN": "Kenia",
+    "KGZ": "Kirguistán", "KIR": "Kiribati", "XKX": "Kosovo", "KWT": "Kuwait",
+    "LAO": "Laos", "LSO": "Lesoto", "LVA": "Letonia", "LBN": "Líbano",
+    "LBR": "Liberia", "LBY": "Libia", "LIE": "Liechtenstein", "LTU": "Lituania",
+    "LUX": "Luxemburgo", "MAC": "Macao", "MKD": "Macedonia", "MDG": "Madagascar",
+    "MYS": "Malasia", "MWI": "Malawi", "MDV": "Maldivas", "MLI": "Malí",
+    "MLT": "Malta", "MAR": "Marruecos", "MTQ": "Martinica", "MUS": "Mauricio",
+    "MRT": "Mauritania", "MYT": "Mayotte", "MEX": "México", "FSM": "Micronesia",
+    "MDA": "Moldova", "MCO": "Mónaco", "MNG": "Mongolia", "MNE": "Montenegro",
+    "MSR": "Montserrat", "MOZ": "Mozambique", "MMR": "Myanmar", "NAM": "Namibia",
+    "NRU": "Nauru", "NPL": "Nepal", "NIC": "Nicaragua", "NER": "Níger",
+    "NGA": "Nigeria", "NIU": "Niue", "NOR": "Noruega", "NCL": "Nueva Caledonia",
+    "NZL": "Nueva Zelanda", "OMN": "Omán", "NLD": "Países Bajos", "PAK": "Pakistán",
+    "PLW": "Palau", "PSE": "Palestina (Gaza)", "PAN": "Panamá", "PNG": "Papua Nueva Guinea",
+    "PRY": "Paraguay", "PER": "Perú", "PYF": "Polinesia Francés", "POL": "Polonia",
+    "PRT": "Portugal", "PRI": "Puerto Rico", "QAT": "Qatar", "GBR": "Reino Unido",
+    "CAF": "República Centroafricana", "CZE": "República Checa", "DOM": "República Dominicana", "REU": "Reunión",
+    "RWA": "Ruanda", "ROU": "Rumania", "RUS": "Rusia", "ESH": "Sáhara Occidental",
+    "MAF": "Saint Martin", "BLM": "Saint-Barthélemy", "WSM": "Samoa", "ASM": "Samoa Americana",
+    "KNA": "San Cristóbal y Nieves", "SMR": "San Marino", "SPM": "San Pedro y Miquelón", "VCT": "San Vicente y las Granadinas",
+    "SHN": "Santa Helena - Ascensión y Tristán da Cunha", "LCA": "Santa Lucía", "STP": "Santo Tomé y Príncipe", "SEN": "Senegal",
+    "SRB": "Serbia", "SYC": "Seychelles", "SLE": "Sierra Leona", "SGP": "Singapur",
+    "SYR": "Siria", "SOM": "Somalia", "LKA": "Sri Lanka", "SWZ": "Suazilandia",
+    "ZAF": "Sudáfrica", "SDN": "Sudán", "SSD": "Sudan Sur", "SWE": "Suecia",
+    "CHE": "Suiza", "SUR": "Suriname", "SJM": "Svalbard y Jan Mayen", "THA": "Tailandia",
+    "TWN": "Taiwan", "TZA": "Tanzania", "TJK": "Tayikistán", "IOT": "Territorio Brtiánico del Océano lndico",
+    "ATF": "Territorios Franceses del Sur", "TLS": "Timor Oriental", "TGO": "Togo", "TKL": "Tokelau",
+    "TON": "Tonga", "TTO": "Trinidad y Tobago", "TUN": "Túnez", "TKM": "Turkmenistán",
+    "TUR": "Turquía", "TUV": "Tuvalu", "UKR": "Ucrania", "UGA": "Uganda",
+    "URY": "Uruguay", "UZB": "Uzbekistán", "VUT": "Vanuatu", "VEN": "Venezuela",
+    "VNM": "Viet Nam", "WLF": "Wallis y Futuna", "YEM": "Yemen", "DJI": "Yibuti",
+    "ZMB": "Zambia", "ZWE": "Zimbabue",
+}
 
-def handle_consulta_ruc_afiliacion(request):
+def _mapear_nacionalidad(codigo):
+    if not codigo:
+        return None
+    codigo = codigo.strip().upper()
+    return MAPA_NACIONALIDADES.get(codigo, codigo)  # si no está en el mapa, deja el código tal cual como fallback
+
+def _formatear_ubigeo_texto(distrito, provincia, departamento):
+    """
+    Arma el texto de ubicación tal como debe quedar guardado, en formato
+    DEPARTAMENTO-PROVINCIA-DISTRITO (ej. 'LIMA-LIMA-LINCE'), a partir de lo
+    que la OCR extrajo directamente de la imagen del DNI/CE. Ya no consulta
+    la tabla sofi_distritos ni depende de que el ubigeo numérico exista ahí.
+    """
+    partes = [
+        (departamento or "").strip().upper(),
+        (provincia or "").strip().upper(),
+        (distrito or "").strip().upper(),
+    ]
+    partes = [p for p in partes if p]
+    return "-".join(partes) if partes else None
+
+def _buscar_ubigeo(cur, distrito, provincia, departamento):
+    """
+    Busca el ubigeo en sofi_distritos a partir de distrito/provincia/departamento
+    extraídos por OCR (Document AI + Gemini). Intenta primero un match exacto
+    por los tres campos; si no hay coincidencia (variaciones de redacción/tildes),
+    cae a un match solo por distrito (toma el primero si hay más de uno).
+    """
+    if not distrito:
+        return None
+
+    distrito_norm     = distrito.strip().upper()
+    provincia_norm     = (provincia or "").strip().upper()
+    departamento_norm  = (departamento or "").strip().upper()
+
+    if provincia_norm and departamento_norm:
+        cur.execute("""
+            SELECT ubigeo FROM sofi_distritos
+            WHERE distrito = %s AND provincia = %s AND departamento = %s
+        """, (distrito_norm, provincia_norm, departamento_norm))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+    cur.execute("SELECT ubigeo FROM sofi_distritos WHERE distrito = %s LIMIT 1", (distrito_norm,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+def _fmt_fecha(valor):
+    if valor is None:
+        return "—"
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    return valor or "—"
+
+
+
+APISPERU_TOKEN = os.environ.get("APISPERU_TOKEN")
+CODIGOS_PERSONA_VALIDOS = {"T", "D1", "D2", "D3", "D4"}
+# =====================================================================
+# 1. INICIAR AFILIACION
+# =====================================================================
+@con_log_errores
+def handle_iniciar_afiliacion(request):
     data = request.get_json(force=True, silent=True) or {}
-    ruc = data.get("ruc", "").strip()
-    if not ruc:
-        return (json.dumps({"error": "El campo ruc es obligatorio"}), 400, HEADERS)
+    dni_titular = (data.get("dni_titular") or "").strip()
+    celular = (data.get("celular") or "").strip()
+    tipo_solicitud = (data.get("tipo_solicitud") or "AFILIACION").strip().upper()
+
+    if not dni_titular:
+        return (json.dumps({"error": "El campo dni_titular es obligatorio"}), 400, HEADERS)
+    if not celular:
+        return (json.dumps({"error": "El campo celular es obligatorio"}), 400, HEADERS)
+    if tipo_solicitud not in ("AFILIACION", "INCLUSION", "TRASLADO"):
+        return (json.dumps({"error": "tipo_solicitud inválido"}), 400, HEADERS)
 
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT razon_social, direccion, departamento, provincia, distrito FROM sctr_empresa WHERE ruc = %s", (ruc,))
+
+    # ─: Bloquear si el DNI no está en la lista autorizada (Congreso) ──
+    cur.execute("SELECT 1 FROM afiliacion_dnis_congreso WHERE dni = %s", (dni_titular,))
+    if not cur.fetchone():
+        cur.close(); conn.close()
+        return (json.dumps({
+            "es_reanudada": "None",
+            "error": "Este DNI no se encuentra habilitado para iniciar el proceso de afiliación."
+        }), 403, HEADERS)
+
+    # ── Bloquear si este DNI ya tiene una afiliación COMPLETADA ──
+    cur.execute("""
+        SELECT id, token, fecha_completada FROM afiliacion_solicitudes
+        WHERE titular_num_documento = %s AND estado = 'COMPLETADA'
+        ORDER BY fecha_completada DESC LIMIT 1
+    """, (dni_titular,))
+    row_completada = cur.fetchone()
+    if row_completada:
+        cur.close(); conn.close()
+        solicitud_previa_id, token_previo, fecha_completada = row_completada
+        return (json.dumps({
+            "error": "Este DNI ya cuenta con una solicitud de afiliación completada. En caso quiera agregar dependientes deberá acercarse al departamento de afiliación del Congreso.",
+            "solicitud_previa_id": solicitud_previa_id,
+            "es_reanudada": "None",
+            "fecha_completada": str(fecha_completada) if fecha_completada else None,
+        }), 409, HEADERS)
+
+    # ── Bloquear si este DNI ya está registrado como dependiente en una solicitud COMPLETADA ──
+    cur.execute("""
+        SELECT ad.solicitud_id, ad.codigo, s.token
+        FROM afiliacion_dependientes ad
+        JOIN afiliacion_solicitudes s ON s.id = ad.solicitud_id
+        WHERE ad.num_documento = %s
+          AND s.estado = 'COMPLETADA'
+        LIMIT 1
+    """, (dni_titular,))
+    row_dependiente = cur.fetchone()
+    if row_dependiente:
+        cur.close(); conn.close()
+        solicitud_dep_id, codigo_dep, token_dep = row_dependiente
+        return (json.dumps({
+            "error": "Este DNI ya está registrado como dependiente en una afiliación completada y no puede afiliarse como titular",
+            "solicitud_id": solicitud_dep_id,
+            "persona_codigo": codigo_dep,
+            "es_reanudada": "None",
+        }), 409, HEADERS)
+
+    # ── Find-or-create por DNI del titular (solo entre las EN_PROCESO) ──
+    cur.execute("""
+        SELECT id, token FROM afiliacion_solicitudes
+        WHERE titular_num_documento = %s AND estado = 'EN_PROCESO'
+        ORDER BY id DESC LIMIT 1
+    """, (dni_titular,))
     row = cur.fetchone()
 
     if row:
+        solicitud_id, token = row
+
+        # La solicitud ya existe y está EN_PROCESO.
+        # Actualizamos ambos campos para garantizar que el celular
+        # quede disponible desde el inicio del proceso.
+        cur.execute("""
+            UPDATE afiliacion_solicitudes
+            SET celular_origen_wsp = %s,
+                titular_celular = %s
+            WHERE id = %s
+        """, (celular, celular, solicitud_id))
+
+        conn.commit()
+        es_reanudada = True
+
+    else:
+        token = str(uuid.uuid4())
+
+        # Guardamos el celular desde el inicio tanto como
+        # celular de origen WhatsApp como celular del titular.
+        cur.execute("""
+            INSERT INTO afiliacion_solicitudes
+                (
+                    token,
+                    tipo_solicitud,
+                    celular_origen_wsp,
+                    titular_celular,
+                    titular_num_documento
+                )
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            token,
+            tipo_solicitud,
+            celular,
+            celular,
+            dni_titular
+        ))
+
+        solicitud_id = cur.fetchone()[0]
+        conn.commit()
+        es_reanudada = False
+
+    cur.close(); conn.close()
+
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link = f"{base_url}/afiliacion/{token}"
+
+    return (json.dumps({
+        "solicitud_id": solicitud_id,
+        "token": token,
+        "error": f"Ingresar al link generado para terminar el flujo {link}",
+        "link": link,
+        "es_reanudada": es_reanudada,
+    }, ensure_ascii=False), 200, HEADERS)
+
+ 
+ 
+# =====================================================================
+# 2. CONSULTA RUC (reusa sctr_empresa, sin telefono)
+# =====================================================================
+@con_log_errores
+def handle_consulta_ruc_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    ruc = data.get("ruc", "").strip()
+    token = data.get("token", "").strip()
+ 
+    if not ruc:
+        return (json.dumps({"error": "El campo ruc es obligatorio"}), 400, HEADERS)
+    if len(ruc) != 11 or not ruc.isdigit():
+        return (json.dumps({"error": "RUC inválido, debe tener 11 dígitos"}), 400, HEADERS)
+ 
+    conn = get_connection()
+    cur = conn.cursor()
+ 
+    cur.execute("""
+        SELECT razon_social, direccion, departamento, provincia, distrito
+        FROM sctr_empresa WHERE ruc = %s
+    """, (ruc,))
+    row = cur.fetchone()
+ 
+    if row:
         razon_social, direccion, departamento, provincia, distrito = row
     else:
-        resp = requests.get(f"https://dniruc.apisperu.com/api/v1/ruc/{ruc}?token={APISPERU_TOKEN}", timeout=10)
-        obj = resp.json()
+        try:
+            resp = requests.get(
+                f"https://dniruc.apisperu.com/api/v1/ruc/{ruc}?token={APISPERU_TOKEN}",
+                timeout=10
+            )
+            obj = resp.json()
+        except Exception as e:
+            cur.close(); conn.close()
+            return (json.dumps({"error": f"Error consultando API RUC: {str(e)}"}), 500, HEADERS)
+ 
         razon_social = obj.get("razonSocial", "")
         direccion    = obj.get("direccion", "")
         distrito     = obj.get("distrito", "")
         provincia    = obj.get("provincia", "")
         departamento = obj.get("departamento", "")
-        if razon_social:
-            cur.execute("""
-                INSERT INTO sctr_empresa (ruc, razon_social, direccion, departamento, provincia, distrito, fecha_creacion, fecha_ult_acceso)
-                VALUES (%s, %s, %s, %s, %s, %s, now(), now())
-                ON CONFLICT (ruc) DO NOTHING
-            """, (ruc, razon_social, direccion, departamento, provincia, distrito))
-            conn.commit()
+ 
+        if not razon_social:
+            cur.close(); conn.close()
+            return (json.dumps({"error": "RUC no encontrado"}), 404, HEADERS)
+ 
+        cur.execute("""
+            INSERT INTO sctr_empresa
+                (ruc, razon_social, direccion, departamento, provincia, distrito, fecha_creacion, fecha_ult_acceso)
+            VALUES (%s, %s, %s, %s, %s, %s, now(), now())
+            ON CONFLICT (ruc) DO NOTHING
+        """, (ruc, razon_social, direccion, departamento, provincia, distrito))
+        conn.commit()
+ 
+    # Si viene un token de solicitud, asociamos el RUC de una vez
+    if token:
+        cur.execute("""
+            UPDATE afiliacion_solicitudes SET ruc = %s
+            WHERE token = %s AND estado = 'EN_PROCESO'
+        """, (ruc, token))
+        conn.commit()
+ 
+    cur.close(); conn.close()
+ 
+    return (json.dumps({
+        "ruc": ruc,
+        "razon_social": razon_social,
+        "direccion": direccion,
+        "departamento": departamento,
+        "provincia": provincia,
+        "distrito": distrito,
+    }, ensure_ascii=False), 200, HEADERS)
+ 
+ 
+# =====================================================================
+# 3. OCR DE DOCUMENTO (DNI/CE) - titular o dependiente
+# =====================================================================
+@con_log_errores
+def handle_ocr_documento_afiliacion(request):
+    """
+    Recibe una o dos imágenes (anverso/reverso, base64) de DNI/CE de una
+    persona (titular o dependiente) y reusa extraer_datos_dni() -- la misma
+    función de Document AI + Gemini que ya usa programa-cronico -- para
+    devolver los campos estructurados SIN guardarlos aún (el front los
+    muestra para confirmación/edición antes de llamar a guardar-paso).
+
+    Body esperado:
+    {
+      "token": "...",
+      "persona_codigo": "T",
+      "imagen_anverso_base64": "data:image/jpeg;base64,....",
+      "imagen_reverso_base64": "data:image/jpeg;base64,...."   # opcional
+    }
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    persona_codigo = data.get("persona_codigo", "").strip().upper()
+    imagen_anverso_base64 = data.get("imagen_anverso_base64", "")
+    imagen_reverso_base64 = data.get("imagen_reverso_base64", "")
+
+    if not token or not imagen_anverso_base64:
+        return (json.dumps({"error": "token e imagen_anverso_base64 son obligatorios"}), 400, HEADERS)
+    if persona_codigo not in CODIGOS_PERSONA_VALIDOS:
+        return (json.dumps({"error": "persona_codigo inválido"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, estado, fecha_expira FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    solicitud_id, estado, fecha_expira = row
+    ahora = datetime.now(LIMA_TZ)
+    if estado != "EN_PROCESO" or (fecha_expira and fecha_expira.replace(tzinfo=LIMA_TZ) < ahora):
+        cur.close(); conn.close()
+        return (json.dumps({"error": "La solicitud ya no está vigente"}), 409, HEADERS)
+
+    # Subir imágenes a Cloud Storage (para trazabilidad, igual que en cronico)
+    ruta_anverso = _subir_imagen_storage(token, persona_codigo, "DNI_ANVERSO", imagen_anverso_base64)
+    cur.execute("""
+        INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+        VALUES (%s, %s, 'DNI_ANVERSO', %s)
+    """, (solicitud_id, persona_codigo, ruta_anverso))
+
+    ruta_reverso = None
+    if imagen_reverso_base64:
+        ruta_reverso = _subir_imagen_storage(token, persona_codigo, "DNI_REVERSO", imagen_reverso_base64)
+        cur.execute("""
+            INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+            VALUES (%s, %s, 'DNI_REVERSO', %s)
+        """, (solicitud_id, persona_codigo, ruta_reverso))
+
+    conn.commit()
+    cur.close(); conn.close()
+
+    # Reusa la función real de OCR + Gemini que ya usa programa-cronico
+    bytes_anverso = base64.b64decode(imagen_anverso_base64.split(",")[-1])
+    bytes_reverso = base64.b64decode(imagen_reverso_base64.split(",")[-1]) if imagen_reverso_base64 else None
+
+    datos_dni = extraer_datos_dni(
+        bytes_anverso, "image/jpeg",
+        bytes_reverso, "image/jpeg" if bytes_reverso else None
+    )
+
+    # extraer_datos_dni() devuelve nombres y apellidos juntos; el formulario
+    # de afiliación los pide separados (paterno/materno), así que se separa
+    # de forma simple. Si el resultado no calza, el front deja editar a mano.
+    apellidos_completos = (datos_dni.get("apellidos") or "").strip()
+    partes_apellido = apellidos_completos.split(" ", 1)
+    apellido_paterno = partes_apellido[0] if partes_apellido else ""
+    apellido_materno = partes_apellido[1] if len(partes_apellido) > 1 else ""
+
+    campos_extraidos = {
+        "apellido_paterno": apellido_paterno,
+        "apellido_materno": apellido_materno,
+        "nombres": datos_dni.get("nombres"),
+        "tipo_documento": datos_dni.get("tipo_documento"),
+        "num_documento": datos_dni.get("n_documento"),
+        "fecha_nacimiento": datos_dni.get("fecha_nacimiento"),
+        "direccion": datos_dni.get("domicilio"),
+        "distrito": datos_dni.get("distrito"),
+        "provincia": datos_dni.get("provincia"),
+        "departamento": datos_dni.get("departamento"),
+    }
+
+    return (json.dumps({
+        "persona_codigo": persona_codigo,
+        "ruta_anverso": ruta_anverso,
+        "ruta_reverso": ruta_reverso,
+        "campos_extraidos": campos_extraidos,
+    }, ensure_ascii=False), 200, HEADERS)
+ 
+def _subir_archivo_generico_storage(token, persona_codigo, tipo_documento, archivo_base64):
+    bucket_name = os.environ.get("BUCKET_AFILIACION", "sanitas-afiliacion-docs")
+
+    if "," in archivo_base64:
+        header, contenido_b64 = archivo_base64.split(",", 1)
+    else:
+        header, contenido_b64 = "", archivo_base64
+
+    if "application/pdf" in header:
+        content_type, ext = "application/pdf", "pdf"
+    else:
+        content_type, ext = "image/jpeg", "jpg"
+
+    blob_path = f"afiliacion-regular/{token}/{persona_codigo}_{tipo_documento}.{ext}"
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_string(base64.b64decode(contenido_b64), content_type=content_type)
+
+    return f"gs://{bucket_name}/{blob_path}" 
+
+def _subir_imagen_storage(token, persona_codigo, tipo_documento, imagen_base64):
+    """
+    Sube la imagen decodificada al bucket PRIVADO de afiliación.
+    Devuelve la ruta interna gs://... (no una URL pública, porque el
+    bucket tiene public_access_prevention activado). Para ver el archivo
+    después, usar generar_url_firmada_afiliacion().
+    """
+    bucket_name = os.environ.get("BUCKET_AFILIACION", "sanitas-afiliacion-docs")
+    blob_path = f"afiliacion-regular/{token}/{persona_codigo}_{tipo_documento}.jpg"
+
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    img_bytes = base64.b64decode(imagen_base64.split(",")[-1])
+    blob.upload_from_string(img_bytes, content_type="image/jpeg")
+
+    return f"gs://{bucket_name}/{blob_path}"
+ 
+_credenciales_firma = None
+
+def _obtener_credenciales_firma():
+    """
+    Obtiene (y cachea) credenciales con access_token + service_account_email,
+    necesarias para firmar URLs vía la API de IAM (SignBlob) en vez de con
+    una llave privada local -- que la cuenta de servicio default de Compute
+    no tiene. Requiere que esa cuenta tenga el rol
+    roles/iam.serviceAccountTokenCreator sobre sí misma.
+    """
+    global _credenciales_firma
+    if _credenciales_firma is None:
+        credenciales, _ = google.auth.default()
+        credenciales.refresh(google_auth_requests.Request())
+        _credenciales_firma = credenciales
+    else:
+        if not _credenciales_firma.valid:
+            _credenciales_firma.refresh(google_auth_requests.Request())
+    return _credenciales_firma
+
+
+def generar_url_firmada_afiliacion(ruta_gs, minutos_expiracion=30):
+    """
+    Genera una URL temporal firmada para ver un documento del bucket privado
+    de afiliación. Úsala solo desde endpoints internos protegidos (ej.
+    handle_consultar_estado_afiliacion, handle_reporte_afiliacion), nunca la
+    devuelvas en respuestas públicas del wizard.
+    """
+    if not ruta_gs or not ruta_gs.startswith("gs://"):
+        return None
+
+    bucket_name, blob_path = ruta_gs.replace("gs://", "", 1).split("/", 1)
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    credenciales = _obtener_credenciales_firma()
+
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=minutos_expiracion),
+        method="GET",
+        service_account_email=credenciales.service_account_email,
+        access_token=credenciales.token,
+    )
+
+def _document_ai_extraer_texto(imagen_base64):
+    """
+    Placeholder: reusar el cliente de Document AI ya configurado en
+    procesar-receta / programa-cronico (mismo processor_id de OCR genérico
+    o uno dedicado a DNI/CE si ya lo tienes).
+    Debe devolver el texto plano extraído del documento.
+    """
+    raise NotImplementedError("Conectar con el cliente Document AI existente en sofi-apis")
+ 
+ 
+def _gemini_extraer_campos_dni(texto_ocr):
+    """
+    Placeholder: prompt a Gemini (gemini-2.5-flash-lite, con backoff exponencial
+    en ResourceExhausted, igual que en agente_consulta.py) para estructurar el
+    texto OCR en JSON:
+    {
+      "apellido_paterno": "...",
+      "apellido_materno": "...",
+      "nombres": "...",
+      "tipo_documento": "DNI",
+      "num_documento": "...",
+      "fecha_nacimiento": "YYYY-MM-DD",
+      "sexo": "M" | "F"
+    }
+    """
+    raise NotImplementedError("Conectar con el cliente Gemini existente en sofi-apis")
+ 
+ 
+# =====================================================================
+# 4. GUARDAR PASO (persistencia incremental del wizard)
+# =====================================================================
+@con_log_errores
+def handle_guardar_paso_afiliacion(request):
+    """
+    Guarda el progreso de un paso del wizard. El 'paso' determina qué tabla(s)
+    se actualizan. Diseñado para poder llamarse repetidamente sin duplicar datos
+    (upsert por token + persona_codigo donde aplique).
+ 
+    Body esperado:
+    {
+      "token": "...",
+      "paso": 2,                 # 1=empleadora/plan, 2=titular, 3=dependiente, ...
+      "persona_codigo": "T",     # requerido en pasos 2 y 3
+      "datos": { ... }           # campos propios de ese paso
+    }
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    paso = data.get("paso")
+    persona_codigo = (data.get("persona_codigo") or "").strip().upper()
+    datos = data.get("datos") or {}
+ 
+    if not token or paso is None:
+        return (json.dumps({"error": "token y paso son obligatorios"}), 400, HEADERS)
+ 
+    conn = get_connection()
+    cur = conn.cursor()
+ 
+    cur.execute("SELECT id, estado FROM afiliacion_solicitudes WHERE token = %s", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+    solicitud_id, estado = row
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": "La solicitud ya no está en proceso"}), 409, HEADERS)
+ 
+    if paso == 1:
+        # Plan (y RUC ya fue asociado en consulta_ruc_afiliacion)
+        cur.execute("""
+            UPDATE afiliacion_solicitudes SET plan = %s, paso_actual = GREATEST(paso_actual, 2)
+            WHERE id = %s
+        """, (datos.get("plan"), solicitud_id))
+ 
+    elif paso == 2:
+        # Datos del titular
+        cur.execute("""
+            UPDATE afiliacion_solicitudes SET
+                titular_apellido_paterno = %s, titular_apellido_materno = %s, titular_nombres = %s,
+                titular_fecha_nacimiento = %s, titular_sexo = %s, titular_tipo_documento = %s,
+                titular_num_documento = %s, titular_nacionalidad = %s, titular_estado_civil = %s,
+                titular_direccion = %s, titular_distrito = %s, titular_provincia = %s,
+                titular_departamento = %s, titular_telefono = %s, titular_celular = %s,
+                titular_email = %s, paso_actual = GREATEST(paso_actual, 3)
+            WHERE id = %s
+        """, (
+            datos.get("apellido_paterno"), datos.get("apellido_materno"), datos.get("nombres"),
+            datos.get("fecha_nacimiento"), datos.get("sexo"), datos.get("tipo_documento"),
+            datos.get("num_documento"), datos.get("nacionalidad"), datos.get("estado_civil"),
+            datos.get("direccion"), datos.get("distrito"), datos.get("provincia"),
+            datos.get("departamento"), datos.get("telefono"), datos.get("celular"),
+            datos.get("email"), solicitud_id
+        ))
+ 
+    elif paso == 3:
+        # Dependiente (upsert por solicitud_id + codigo)
+        if persona_codigo not in {"D1", "D2", "D3", "D4"}:
+            cur.close(); conn.close()
+            return (json.dumps({"error": "persona_codigo inválido para dependiente"}), 400, HEADERS)
+        cur.execute("""
+            INSERT INTO afiliacion_dependientes
+                (solicitud_id, codigo, apellido_paterno, apellido_materno, nombres,
+                 sexo, fecha_nacimiento, tipo_documento, num_documento, parentesco)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (solicitud_id, codigo) DO UPDATE SET
+                apellido_paterno = EXCLUDED.apellido_paterno,
+                apellido_materno = EXCLUDED.apellido_materno,
+                nombres = EXCLUDED.nombres,
+                sexo = EXCLUDED.sexo,
+                fecha_nacimiento = EXCLUDED.fecha_nacimiento,
+                tipo_documento = EXCLUDED.tipo_documento,
+                num_documento = EXCLUDED.num_documento,
+                parentesco = EXCLUDED.parentesco
+        """, (
+            solicitud_id, persona_codigo, datos.get("apellido_paterno"), datos.get("apellido_materno"),
+            datos.get("nombres"), datos.get("sexo"), datos.get("fecha_nacimiento"),
+            datos.get("tipo_documento"), datos.get("num_documento"), datos.get("parentesco")
+        ))
+        cur.execute("""
+            UPDATE afiliacion_solicitudes SET paso_actual = GREATEST(paso_actual, 4) WHERE id = %s
+        """, (solicitud_id,))
+ 
+    else:
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"Paso {paso} no manejado por este endpoint"}), 400, HEADERS)
+ 
+    conn.commit()
+    cur.close(); conn.close()
+ 
+    return (json.dumps({"ok": True, "solicitud_id": solicitud_id, "paso_guardado": paso}), 200, HEADERS)
+ 
+ 
+# =====================================================================
+# 5. GUARDAR DECLARACION DE SALUD (cifrada)
+# =====================================================================
+@con_log_errores
+def handle_guardar_declaracion_salud(request):
+    """
+    Body esperado:
+    {
+      "token": "...",
+      "persona_codigo": "T",
+      "peso_kg": "75",
+      "talla_cm": "170",
+      "respuestas": {"1.2": "N", "1.3": "S", ..., "3.20": "N"},
+      "embarazo_meses": null,
+      "diagnosticos": [
+        {
+          "pregunta_codigo": "3.9",
+          "diagnostico": "Hernia discal L4-L5",
+          "extremidad": "N/A",
+          "medico_tratante": "Dr. Perez",
+          "fecha_diagnostico": "2024-03-10",
+          "situacion_actual": "En tratamiento conservador"
+        }
+      ]
+    }
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    persona_codigo = (data.get("persona_codigo") or "").strip().upper()
+ 
+    if not token or persona_codigo not in CODIGOS_PERSONA_VALIDOS:
+        return (json.dumps({"error": "token y persona_codigo (T/D1-D4) son obligatorios"}), 400, HEADERS)
+
+    peso_kg_raw = str(data.get("peso_kg") or "").strip()
+    talla_cm_raw = str(data.get("talla_cm") or "").strip()
+
+    if not peso_kg_raw or not talla_cm_raw:
+        return (json.dumps({
+            "error": "peso_kg y talla_cm son obligatorios para continuar",
+            "persona_codigo": persona_codigo,
+        }), 400, HEADERS)
+
+    try:
+        peso_valor = float(peso_kg_raw)
+        talla_valor = float(talla_cm_raw)
+    except (TypeError, ValueError):
+        return (json.dumps({
+            "error": "peso_kg y talla_cm deben ser valores numéricos",
+            "persona_codigo": persona_codigo,
+        }), 400, HEADERS)
+
+    if not (1 <= peso_valor <= 300):
+        return (json.dumps({
+            "error": "peso_kg debe estar entre 1 y 300 kg",
+            "persona_codigo": persona_codigo,
+        }), 400, HEADERS)
+
+    if not (30 <= talla_valor <= 250):
+        return (json.dumps({
+            "error": "talla_cm debe estar entre 30 y 250 cm",
+            "persona_codigo": persona_codigo,
+        }), 400, HEADERS)
+ 
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM afiliacion_solicitudes WHERE token = %s AND estado = 'EN_PROCESO'", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada o no vigente"}), 404, HEADERS)
+    solicitud_id = row[0]
+ 
+    peso_enc = cifrar(peso_kg_raw)
+    talla_enc = cifrar(talla_cm_raw)
+
+    respuestas_enc = cifrar_json(data.get("respuestas") or {})
+    embarazo_enc = cifrar(data.get("embarazo_meses")) if data.get("embarazo_meses") else None
+ 
+    cur.execute("""
+        INSERT INTO afiliacion_declaracion_salud
+            (solicitud_id, persona_codigo, peso_kg_enc, talla_cm_enc, respuestas_enc, embarazo_meses_enc)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (solicitud_id, persona_codigo) DO UPDATE SET
+            peso_kg_enc = EXCLUDED.peso_kg_enc,
+            talla_cm_enc = EXCLUDED.talla_cm_enc,
+            respuestas_enc = EXCLUDED.respuestas_enc,
+            embarazo_meses_enc = EXCLUDED.embarazo_meses_enc,
+            fecha_registro = now()
+    """, (solicitud_id, persona_codigo, peso_enc, talla_enc, respuestas_enc, embarazo_enc))
+ 
+    # Reemplazar detalle de diagnósticos de esta persona (borra e inserta de nuevo, más simple que diffing)
+    cur.execute("""
+        DELETE FROM afiliacion_diagnosticos_detalle WHERE solicitud_id = %s AND persona_codigo = %s
+    """, (solicitud_id, persona_codigo))
+ 
+    for diag in data.get("diagnosticos") or []:
+        cur.execute("""
+            INSERT INTO afiliacion_diagnosticos_detalle
+                (solicitud_id, persona_codigo, pregunta_codigo, diagnostico_enc,
+                 extremidad, medico_tratante_enc, fecha_diagnostico, situacion_actual_enc)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            solicitud_id, persona_codigo, diag.get("pregunta_codigo"),
+            cifrar(diag.get("diagnostico")), diag.get("extremidad"),
+            cifrar(diag.get("medico_tratante")), diag.get("fecha_diagnostico"),
+            cifrar(diag.get("situacion_actual"))
+        ))
+ 
+    conn.commit()
+    cur.close(); conn.close()
+ 
+    return (json.dumps({"ok": True, "persona_codigo": persona_codigo}), 200, HEADERS)
+ 
+ 
+# =====================================================================
+# 6. GUARDAR ANTECEDENTES EN SISTEMA DE SALUD (seguro anterior)
+# =====================================================================
+@con_log_errores
+def handle_guardar_antecedentes_seguro(request):
+    """
+    Body esperado:
+    {
+      "token": "...",
+      "persona_codigo": "T",
+      "tuvo_seguro": true,
+      "tipo_seguro": "EPS",
+      "modalidad": "COLECTIVO",
+      "asegurador_anterior": "Rimac EPS",
+      "fecha_desde": "2019-01-01",
+      "fecha_hasta": "2023-12-31"
+    }
+    No es dato de salud propiamente, pero se guarda sin cifrar salvo el
+    nombre del asegurador si prefieres tratarlo como sensible; aquí se deja
+    en claro porque no revela condición de salud, solo historial comercial.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    persona_codigo = (data.get("persona_codigo") or "").strip().upper()
+ 
+    if not token or persona_codigo not in CODIGOS_PERSONA_VALIDOS:
+        return (json.dumps({"error": "token y persona_codigo (T/D1-D4) son obligatorios"}), 400, HEADERS)
+ 
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM afiliacion_solicitudes WHERE token = %s AND estado = 'EN_PROCESO'", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada o no vigente"}), 404, HEADERS)
+    solicitud_id = row[0]
+ 
+    # Upsert manual (no hay UNIQUE(solicitud_id, persona_codigo) aquí porque
+    # una persona podría declarar más de un seguro anterior; se borra e
+    # inserta de nuevo cada vez que el front envía este paso, igual que
+    # con diagnosticos_detalle).
+    cur.execute("""
+        DELETE FROM afiliacion_antecedentes_seguro WHERE solicitud_id = %s AND persona_codigo = %s
+    """, (solicitud_id, persona_codigo))
+ 
+    registros = data.get("registros")
+    if registros is None:
+        # compatibilidad si el front manda un solo registro plano
+        registros = [data] if data.get("tuvo_seguro") is not None else []
+ 
+    for reg in registros:
+        cur.execute("""
+            INSERT INTO afiliacion_antecedentes_seguro
+                (solicitud_id, persona_codigo, tuvo_seguro, tipo_seguro, modalidad,
+                 asegurador_anterior, fecha_desde, fecha_hasta)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            solicitud_id, persona_codigo, bool(reg.get("tuvo_seguro")),
+            reg.get("tipo_seguro"), reg.get("modalidad"), reg.get("asegurador_anterior"),
+            reg.get("fecha_desde"), reg.get("fecha_hasta")
+        ))
+ 
+    conn.commit()
+    cur.close(); conn.close()
+ 
+    return (json.dumps({"ok": True, "persona_codigo": persona_codigo}), 200, HEADERS)
+ 
+ 
+# =====================================================================
+# 7. GUARDAR FIRMA
+# =====================================================================
+TIPOS_DOCUMENTO_CIVIL_VALIDOS = {"PARTIDA_MATRIMONIO", "UNION_DE_HECHO"}
+TIPOS_DOCUMENTO_ADICIONAL_VALIDOS = {"CARNET_CONADIS"}
+TIPOS_DOCUMENTO_GENERICO_VALIDOS = TIPOS_DOCUMENTO_CIVIL_VALIDOS | TIPOS_DOCUMENTO_ADICIONAL_VALIDOS
+
+@con_log_errores
+def handle_guardar_documento_civil_afiliacion(request):
+    """
+    Sube el documento que sustenta el estado civil declarado:
+    - CASADO      -> PARTIDA_MATRIMONIO
+    - CONVIVIENTE -> UNION_DE_HECHO
+    Aplica tanto al titular como a cualquier dependiente.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    persona_codigo = (data.get("persona_codigo") or "").strip().upper()
+    tipo_documento = (data.get("tipo_documento") or "").strip().upper()
+    archivo_base64 = data.get("archivo_base64", "")
+
+    if not token or not archivo_base64:
+        return (json.dumps({"error": "token y archivo_base64 son obligatorios"}), 400, HEADERS)
+    if persona_codigo not in CODIGOS_PERSONA_VALIDOS:
+        return (json.dumps({"error": "persona_codigo inválido"}), 400, HEADERS)
+    if tipo_documento not in TIPOS_DOCUMENTO_GENERICO_VALIDOS:
+        return (json.dumps({"error": "tipo_documento inválido"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, estado FROM afiliacion_solicitudes WHERE token = %s", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+    solicitud_id, estado = row
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"La solicitud ya no está en proceso (estado: {estado})"}), 409, HEADERS)
+
+    # Si ya había uno del mismo tipo para esa persona, lo reemplaza (permite corregir)
+    cur.execute("""
+        DELETE FROM afiliacion_documentos
+        WHERE solicitud_id = %s AND persona_codigo = %s AND tipo_documento = %s
+    """, (solicitud_id, persona_codigo, tipo_documento))
+
+    ruta = _subir_archivo_generico_storage(token, persona_codigo, tipo_documento, archivo_base64)
+
+    cur.execute("""
+        INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+        VALUES (%s, %s, %s, %s)
+    """, (solicitud_id, persona_codigo, tipo_documento, ruta))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({"ok": True, "ruta_storage": ruta}), 200, HEADERS)
+
+@con_log_errores
+def handle_guardar_firma_afiliacion(request):
+    """
+    Solo el titular firma (a diferencia del programa crónico que usa firma dual).
+    Body esperado: { "token": "...", "firma_base64": "data:image/png;base64,...." }
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    firma_base64 = data.get("firma_base64", "")
+
+    if not token or not firma_base64:
+        return (json.dumps({"error": "token y firma_base64 son obligatorios"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM afiliacion_solicitudes WHERE token = %s AND estado = 'EN_PROCESO'", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada o no vigente"}), 404, HEADERS)
+    solicitud_id = row[0]
+
+    ruta_firma = _subir_imagen_storage(token, "T", "FIRMA", firma_base64)
+
+    cur.execute("""
+        INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+        VALUES (%s, 'T', 'FIRMA', %s)
+    """, (solicitud_id, ruta_firma))
+    cur.execute("""
+        UPDATE afiliacion_solicitudes SET ruta_firma = %s, paso_actual = GREATEST(paso_actual, 7)
+        WHERE id = %s
+    """, (ruta_firma, solicitud_id))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({"ok": True, "ruta_firma": ruta_firma}), 200, HEADERS)
+ 
+ 
+# =====================================================================
+# 8. FINALIZAR AFILIACION (genera PDF, envía correo y WhatsApp)
+# =====================================================================
+def _armar_zip_dni_afiliacion(cur, solicitud_id):
+    """
+    Descarga las fotos de DNI (anverso/reverso), el documento de estado civil
+    (Partida de Matrimonio o Unión de Hecho) y el carné de CONADIS de cada
+    dependiente incapacitado, y los empaqueta en un ZIP en memoria. No incluye
+    la firma ni el PDF final.
+    """
+    cur.execute("""
+        SELECT persona_codigo, tipo_documento, ruta_storage
+        FROM afiliacion_documentos
+        WHERE solicitud_id = %s AND tipo_documento IN
+            ('DNI_ANVERSO', 'DNI_REVERSO', 'PARTIDA_MATRIMONIO', 'UNION_DE_HECHO', 'CARNET_CONADIS')
+        ORDER BY persona_codigo, tipo_documento
+    """, (solicitud_id,))
+    documentos = cur.fetchall()
+
+    if not documentos:
+        return None
+
+    buffer_zip = io.BytesIO()
+    with zipfile.ZipFile(buffer_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for persona_codigo, tipo_documento, ruta_storage in documentos:
+            if not ruta_storage or not ruta_storage.startswith("gs://"):
+                continue
+            bucket_name, blob_path = ruta_storage.replace("gs://", "", 1).split("/", 1)
+            blob = storage_client.bucket(bucket_name).blob(blob_path)
+            try:
+                contenido = blob.download_as_bytes()
+            except Exception as e:
+                logging.warning(f"No se pudo descargar {ruta_storage} para el ZIP: {e}")
+                continue
+
+            extension = blob_path.rsplit(".", 1)[-1] if "." in blob_path else "jpg"
+            nombre_en_zip = f"{persona_codigo}_{tipo_documento}.{extension}"
+            zf.writestr(nombre_en_zip, contenido)
+
+    buffer_zip.seek(0)
+    return buffer_zip.read()
+
+@con_log_errores
+def handle_finalizar_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return (json.dumps({"error": "token es obligatorio"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, estado, titular_email, titular_nombres, titular_apellido_paterno,
+               titular_apellido_materno, titular_celular, titular_num_documento,
+               celular_origen_wsp
+        FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    (solicitud_id, estado, email, nombres, apellido_paterno,
+     apellido_materno, celular, num_documento, celular_origen_wsp) = row
+
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"La solicitud ya está en estado {estado}"}), 409, HEADERS)
+
+    contexto = _armar_contexto_pdf(cur, solicitud_id)
+    zip_bytes = _armar_zip_dni_afiliacion(cur, solicitud_id)
+    cur.close(); conn.close()
+
+    ruta_pdf_local = _generar_pdf_afiliacion(token, contexto)
+    pdf_bytes = open(ruta_pdf_local, "rb").read()
+    ruta_storage_pdf = _subir_pdf_storage(token, ruta_pdf_local)
+
+    _enviar_correo_afiliacion(
+        email, nombres, apellido_paterno, apellido_materno,
+        celular, num_documento, pdf_bytes, zip_bytes
+    )
+    _notificar_whatsapp_afiliacion(celular_origen_wsp or celular, nombres)  # ← ahora usa celular_origen_wsp, con fallback
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE afiliacion_solicitudes
+        SET estado = 'COMPLETADA', ruta_pdf_final = %s, paso_actual = 8, fecha_completada = now()
+        WHERE id = %s
+    """, (ruta_storage_pdf, solicitud_id))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "ok": True,
+        "solicitud_id": solicitud_id,
+        "ruta_pdf": ruta_storage_pdf,
+    }, ensure_ascii=False), 200, HEADERS)
+
+ 
+ 
+def _armar_contexto_pdf(cur, solicitud_id):
+    """
+    Arma el diccionario de contexto para el template Jinja2, descifrando
+    únicamente lo necesario y solo en memoria (nunca se vuelve a persistir
+    en claro).
+    """
+    cur.execute("""
+        SELECT * FROM afiliacion_solicitudes WHERE id = %s
+    """, (solicitud_id,))
+    col_names = [d[0] for d in cur.description]
+    solicitud = dict(zip(col_names, cur.fetchone()))
+
+    # ── Datos de la empresa (viven en sctr_empresa, no en afiliacion_solicitudes) ──
+    if solicitud.get("ruc"):
+        cur.execute("""
+            SELECT razon_social, direccion, departamento, provincia, distrito
+            FROM sctr_empresa WHERE ruc = %s
+        """, (solicitud["ruc"],))
+        row_empresa = cur.fetchone()
+        if row_empresa:
+            solicitud["empresa_razon_social"] = row_empresa[0]
+            solicitud["empresa_direccion"] = row_empresa[1]
+            solicitud["empresa_departamento"] = row_empresa[2]
+            solicitud["empresa_provincia"] = row_empresa[3]
+            solicitud["empresa_distrito"] = row_empresa[4]
+
+    cur.execute("""
+        SELECT codigo, apellido_paterno, apellido_materno, nombres, sexo,
+               fecha_nacimiento, tipo_documento, num_documento, parentesco, nacionalidad, ubigeo
+        FROM afiliacion_dependientes WHERE solicitud_id = %s ORDER BY codigo
+    """, (solicitud_id,))
+
+    dep_cols = [d[0] for d in cur.description]
+    dependientes = [dict(zip(dep_cols, r)) for r in cur.fetchall()]
+
+    cur.execute("""
+        SELECT persona_codigo, peso_kg_enc, talla_cm_enc, respuestas_enc, embarazo_meses_enc
+        FROM afiliacion_declaracion_salud WHERE solicitud_id = %s
+    """, (solicitud_id,))
+    declaracion_salud = {}
+    for persona_codigo, peso_enc, talla_enc, respuestas_enc, embarazo_enc in cur.fetchall():
+        declaracion_salud[persona_codigo] = {
+            "peso_kg": descifrar(peso_enc),
+            "talla_cm": descifrar(talla_enc),
+            "respuestas": descifrar_json(respuestas_enc) or {},
+            "embarazo_meses": descifrar(embarazo_enc),
+        }
+
+    cur.execute("""
+    SELECT persona_codigo, pregunta_codigo, diagnostico_enc, extremidad,
+           medico_tratante_enc, fecha_diagnostico, situacion_actual_enc
+        FROM afiliacion_diagnosticos_detalle WHERE solicitud_id = %s
+    """, (solicitud_id,))
+        
+    diagnosticos = []
+    for pc, pregunta_codigo, diag_enc, extremidad, medico_enc, fecha_diag, situ_enc in cur.fetchall():
+            diagnosticos.append({
+                "persona_codigo": pc,
+                "pregunta_codigo": pregunta_codigo,
+                "diagnostico": descifrar(diag_enc),
+                "extremidad": extremidad,
+                "medico_tratante": descifrar(medico_enc),
+                "fecha_diagnostico": fecha_diag,
+                "situacion_actual": descifrar(situ_enc),
+            })
+
+    cur.execute("""
+        SELECT persona_codigo, tuvo_seguro, tipo_seguro, modalidad,
+               asegurador_anterior, fecha_desde, fecha_hasta
+        FROM afiliacion_antecedentes_seguro WHERE solicitud_id = %s
+    """, (solicitud_id,))
+    ant_cols = [d[0] for d in cur.description]
+    antecedentes_seguro = [dict(zip(ant_cols, r)) for r in cur.fetchall()]
+
+    return {
+        "solicitud": solicitud,
+        "dependientes": dependientes,
+        "declaracion_salud": declaracion_salud,
+        "diagnosticos": diagnosticos,
+        "antecedentes_seguro": antecedentes_seguro,
+        "fecha_emision": datetime.now(LIMA_TZ).strftime("%d/%m/%Y"),
+    }
+ 
+PREGUNTAS_SALUD = [
+    {"codigo": "1.2", "texto": "¿Pérdida de peso no explicada de más de 10 kg en los últimos 6 meses?", "solo_mujeres": False},
+    {"codigo": "1.3", "texto": "¿Presenta alguna discapacidad física o mental?", "solo_mujeres": False},
+    {"codigo": "1.4", "texto": "¿Hospitalización o atención de emergencia en los últimos 6 meses?", "solo_mujeres": False},
+    {"codigo": "1.5", "texto": "¿Consume o ha consumido en forma repetida fármacos?", "solo_mujeres": False},
+    {"codigo": "2.1", "texto": "¿Está actualmente embarazada?", "solo_mujeres": True},
+    {"codigo": "3.1", "texto": "Neurológicas (migraña, epilepsia, convulsiones, vértigo, Parkinson, Alzheimer, ACV, etc.)", "solo_mujeres": False},
+    {"codigo": "3.2", "texto": "Psicológicas o psiquiátricas (ansiedad, depresión, demencia, psicosis, etc.)", "solo_mujeres": False},
+    {"codigo": "3.3", "texto": "Cardiovasculares (hipertensión, enfermedad coronaria, arritmias, várices, trombosis, etc.)", "solo_mujeres": False},
+    {"codigo": "3.4", "texto": "Vías respiratorias (asma, bronquitis crónica, EPOC, sinusitis crónica, etc.)", "solo_mujeres": False},
+    {"codigo": "3.5", "texto": "Gastrointestinales (gastritis crónica, úlcera péptica, colitis, hepatitis crónica, etc.)", "solo_mujeres": False},
+    {"codigo": "3.6", "texto": "Pared abdominal (hernias, eventración, diastasis de rectos)", "solo_mujeres": False},
+    {"codigo": "3.7", "texto": "Endócrinas (diabetes, hipo/hipertiroidismo, bocio, SOP, etc.)", "solo_mujeres": False},
+    {"codigo": "3.8", "texto": "Aparatos urinario y genital (enf. renal crónica, cálculos, próstata, etc.)", "solo_mujeres": False},
+    {"codigo": "3.9", "texto": "Huesos, articulaciones y tejido conjuntivo (artritis, artrosis, hernias de columna, etc.)", "solo_mujeres": False},
+    {"codigo": "3.10", "texto": "Hematológicas (anemia, linfoma, leucemia, trastornos de coagulación, etc.)", "solo_mujeres": False},
+    {"codigo": "3.11", "texto": "Oftalmológicas (estrabismo, catarata, glaucoma, ceguera, etc.)", "solo_mujeres": False},
+    {"codigo": "3.12", "texto": "Otorrinolaringológicas (hipoacusia, sordera, otitis crónica, etc.)", "solo_mujeres": False},
+    {"codigo": "3.13", "texto": "Dermatológicas (psoriasis, acné, carcinomas de piel, melanomas, etc.)", "solo_mujeres": False},
+    {"codigo": "3.14", "texto": "Enfermedades congénitas o genéticas", "solo_mujeres": False},
+    {"codigo": "3.15", "texto": "Enfermedades infecciosas (hepatitis B/C, VIH/SIDA, tuberculosis, etc.)", "solo_mujeres": False},
+    {"codigo": "3.16", "texto": "Oncológicas (tumor benigno, maligno o cáncer en cualquier parte del cuerpo)", "solo_mujeres": False},
+    {"codigo": "3.17", "texto": "¿Ha sido o tiene pendiente alguna intervención quirúrgica?", "solo_mujeres": False},
+    {"codigo": "3.18", "texto": "Trasplante de órganos o tejidos", "solo_mujeres": False},
+    {"codigo": "3.19", "texto": "Otras enfermedades o antecedentes médicos no consignados en la lista", "solo_mujeres": False},
+    {"codigo": "3.20", "texto": "¿Tiene que ser hospitalizado o recibir tratamiento médico próximamente?", "solo_mujeres": False},
+]
+
+def _generar_pdf_afiliacion(token, contexto):
+    jinja_env.filters["fmt_fecha"] = _fmt_fecha
+
+    # Descargar la firma del bucket privado y convertirla a data URI para el PDF
+    ruta_firma = contexto["solicitud"].get("ruta_firma")
+    if ruta_firma:
+        bucket_name, blob_path = ruta_firma.replace("gs://", "", 1).split("/", 1)
+        firma_bytes = storage_client.bucket(bucket_name).blob(blob_path).download_as_bytes()
+        contexto["firma_base64_para_pdf"] = f"data:image/png;base64,{base64.b64encode(firma_bytes).decode()}"
+    else:
+        contexto["firma_base64_para_pdf"] = ""
+
+    contexto["preguntas_salud"] = PREGUNTAS_SALUD
+
+    template = jinja_env.get_template("afiliacion_regular.html")
+    html_renderizado = template.render(**contexto)
+
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    ruta_local = f"/tmp/afiliacion_{token}.pdf"
+    HTML(string=html_renderizado, base_url=f"file://{BASE_DIR}/").write_pdf(ruta_local)
+    
+    return ruta_local
+ 
+ 
+def _subir_pdf_storage(token, ruta_local):
+    """Sube el PDF final al bucket privado. Devuelve la ruta interna gs://..."""
+    bucket_name = os.environ.get("BUCKET_AFILIACION", "sanitas-afiliacion-docs")
+    blob_path = f"afiliacion-regular/{token}/solicitud_final.pdf"
+
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_filename(ruta_local, content_type="application/pdf")
+
+    return f"gs://{bucket_name}/{blob_path}"
+ 
+ 
+DANACONNECT_CONVERSATION_ID_AFILIACION = "600073"
+
+# Correos que reciben copia de TODAS las solicitudes de afiliación completadas
+CORREOS_ADICIONALES_AFILIACION = [
+    "balcazar@sanitasperu.com",
+    "mesadecontrol_eps@sanitasperu.com",
+    "mteruya@sanitasperu.com",
+    # agrega hasta 5 en total
+]
+
+def _enviar_correo_afiliacion(email, nombres, apellido_paterno, apellido_materno, celular, num_documento, pdf_bytes, zip_bytes=None):
+    """
+    Sube el PDF final (y opcionalmente el ZIP de documentos de identidad) a
+    Danaconnect UNA sola vez, y dispara la conversación de afiliación una vez
+    por cada destinatario: el correo del titular + los correos fijos definidos
+    en CORREOS_ADICIONALES_AFILIACION.
+    """
+    if not DANACONNECT_CONVERSATION_ID_AFILIACION:
+        logging.error("DANACONNECT_CONVERSATION_ID_AFILIACION no está configurada; no se envió el correo de afiliación")
+        return
+
+    file_id_pdf = subir_archivo_danaconnect(pdf_bytes, "solicitud_afiliacion.pdf", "application/pdf")
+    logging.info(f"[DEBUG Danaconnect Afiliacion] file_id_pdf obtenido: {file_id_pdf}")
+
+    file_id_zip = None
+    if zip_bytes:
+        file_id_zip = subir_archivo_danaconnect(zip_bytes, "documentos_dni.zip", "application/zip")
+        logging.info(f"[DEBUG Danaconnect Afiliacion] file_id_zip obtenido: {file_id_zip}")
+
+    url = f"https://appserv.danaconnect.com/api/1.0/rest/conversation/{DANACONNECT_CONVERSATION_ID_AFILIACION}/start/data"
+
+    nombre_completo = " ".join(
+        parte for parte in [nombres, apellido_paterno, apellido_materno] if parte
+    ).strip()
+
+    # ── Titular + correos fijos, sin duplicados ──
+    destinatarios = []
+    if email:
+        destinatarios.append(email.strip())
+    for correo_extra in CORREOS_ADICIONALES_AFILIACION[:5]:
+        if correo_extra.lower() not in [d.lower() for d in destinatarios]:
+            destinatarios.append(correo_extra)
+
+    if not destinatarios:
+        logging.warning("[Danaconnect Afiliacion] No hay destinatarios de correo para enviar")
+        return
+
+    for destinatario in destinatarios:
+        payload = {
+            "NOMBRE": nombre_completo,
+            "EMAIL": destinatario,
+            "CELULAR": celular,
+            "DOI": num_documento,
+            "FILE": file_id_pdf,
+        }
+        if file_id_zip:
+            payload["FILE2"] = file_id_zip
+
+        resp = requests.post(
+            url,
+            auth=(DANACONNECT_USER, DANACONNECT_PASSWORD),
+            json=payload,
+            timeout=30,
+        )
+
+        logging.info(f"[DEBUG Danaconnect Afiliacion] destinatario={destinatario} status={resp.status_code} body={resp.text}")
+        resp.raise_for_status()
+
+def _normalizar_celular_pe(celular):
+    """
+    Asegura que el número quede en formato +51XXXXXXXXX.
+    Acepta: '987654321' (9 dígitos), '51987654321', '+51987654321'.
+    Si no calza ningún patrón conocido, lo deja tal cual con un '+' antepuesto
+    (mejor que nada, pero se loguea para revisión manual).
+    """
+    if not celular:
+        return None
+    limpio = re.sub(r"[^\d]", "", celular)  # solo dígitos
+
+    if len(limpio) == 9 and limpio.startswith("9"):
+        return f"+51{limpio}"
+    if len(limpio) == 11 and limpio.startswith("51"):
+        return f"+{limpio}"
+    if celular.startswith("+"):
+        return celular
+
+    logging.warning(f"[Afiliacion] Número de celular con formato inesperado, se envía tal cual: {celular}")
+    return f"+{limpio}"
+
+def _notificar_whatsapp_afiliacion(celular, nombres):
+    """Reusa enviar_danaconnect(), ya definida en main.py, para confirmar por WhatsApp."""
+    numero = _normalizar_celular_pe(celular)
+    if not numero:
+        return
+    nombre_limpio = _limpiar_nombre_sms(nombres or "")
+    mensaje = f"Sanitas: Hola {nombre_limpio}, hemos recibido tu solicitud de preafiliación correctamente. Te enviamos una copia a tu correo."
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "afilicion congreso")
+ 
+def _obtener_documentos_con_urls_firmadas(cur, solicitud_id):
+    """
+    Trae todos los documentos (DNI, firma, PDF) de una solicitud con URLs
+    firmadas temporales (30 min). Solo se usa desde endpoints internos
+    protegidos -- nunca exponer esto al wizard público.
+    """
+    cur.execute("""
+        SELECT persona_codigo, tipo_documento, ruta_storage
+        FROM afiliacion_documentos WHERE solicitud_id = %s
+        ORDER BY persona_codigo, tipo_documento
+    """, (solicitud_id,))
+    documentos = []
+    for persona_codigo, tipo_documento, ruta_storage in cur.fetchall():
+        documentos.append({
+            "persona_codigo": persona_codigo,
+            "tipo_documento": tipo_documento,
+            "url_temporal": generar_url_firmada_afiliacion(ruta_storage),
+        })
+    return documentos
+
+# =====================================================================
+# 9. CONSULTAR ESTADO (uso interno - área médica / suscripción)
+# =====================================================================
+@con_log_errores
+def handle_consultar_estado_afiliacion(request):
+    """
+    Endpoint interno (protegerlo con el mismo mecanismo de auth que uses para
+    endpoints administrativos, ej. API key o IAM). Es el ÚNICO punto del
+    sistema que descifra y expone la declaración de salud en claro, y el
+    único que entrega URLs firmadas temporales para ver los documentos
+    (DNI, firma, PDF final) del bucket privado sanitas-afiliacion-docs.
+    """
+    token = request.args.get("token", "").strip()
+    if not token:
+        return (json.dumps({"error": "token es obligatorio"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, estado FROM afiliacion_solicitudes WHERE token = %s", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    solicitud_id, estado = row
+    contexto = _armar_contexto_pdf(cur, solicitud_id)
+    contexto["documentos"] = _obtener_documentos_con_urls_firmadas(cur, solicitud_id)
+    cur.close(); conn.close()
+
+    contexto["solicitud"]["estado"] = estado
+    return (json.dumps(contexto, ensure_ascii=False, default=str), 200, HEADERS)
+
+@con_log_errores
+def handle_registrar_titular_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    correo = (data.get("correo") or "").strip()
+    celular_body = (data.get("celular") or "").strip()
+    url_dni_anverso = data.get("url_dni_anverso")
+    url_dni_reverso = data.get("url_dni_reverso")
+
+    if not token or not correo or not url_dni_anverso or not url_dni_reverso:
+        return (json.dumps({
+            "error": "token, correo, url_dni_anverso y url_dni_reverso son obligatorios"
+        }), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, estado, titular_num_documento, celular_origen_wsp
+        FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    solicitud_id, estado, dni, celular_origen_wsp = row
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"La solicitud ya no está en proceso (estado: {estado})"}), 409, HEADERS)
+    if not dni:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Esta solicitud no tiene dni_titular registrado (falta llamar /afiliacion/iniciar primero)"}), 409, HEADERS)
+
+    # ── Respaldo: si el bot no vuelve a mandar 'celular' en este paso,
+    # se usa el que ya se guardó en /afiliacion/iniciar (celular_origen_wsp),
+    # para que titular_celular NUNCA quede vacío si ya se tiene un número.
+    celular = celular_body or celular_origen_wsp
+    if not celular:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "No hay celular disponible (ni en el body ni en la solicitud original)"}), 400, HEADERS)
+
+    # ── Descargar ambas imágenes ──
+    try:
+        resp_a = requests.get(url_dni_anverso, timeout=20)
+        resp_a.raise_for_status()
+        bytes_a = resp_a.content
+
+        resp_r = requests.get(url_dni_reverso, timeout=20)
+        resp_r.raise_for_status()
+        bytes_r = resp_r.content
+    except Exception as e:
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"No se pudo descargar alguna de las imágenes: {str(e)}"}), 500, HEADERS)
+
+    # ── Subir a Cloud Storage (bucket privado) para trazabilidad ──
+    bucket_name = os.environ.get("BUCKET_AFILIACION", "sanitas-afiliacion-docs")
+    bucket = storage_client.bucket(bucket_name)
+
+    blob_a = bucket.blob(f"afiliacion-regular/{token}/T_DNI_ANVERSO.jpg")
+    blob_a.upload_from_string(bytes_a, content_type="image/jpeg")
+    ruta_a = f"gs://{bucket_name}/afiliacion-regular/{token}/T_DNI_ANVERSO.jpg"
+
+    blob_r = bucket.blob(f"afiliacion-regular/{token}/T_DNI_REVERSO.jpg")
+    blob_r.upload_from_string(bytes_r, content_type="image/jpeg")
+    ruta_r = f"gs://{bucket_name}/afiliacion-regular/{token}/T_DNI_REVERSO.jpg"
+
+    cur.execute("""
+        INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+        VALUES (%s, 'T', 'DNI_ANVERSO', %s), (%s, 'T', 'DNI_REVERSO', %s)
+    """, (solicitud_id, ruta_a, solicitud_id, ruta_r))
+    conn.commit()
+
+    # ── OCR + Gemini ──
+    datos_dni = extraer_datos_dni(bytes_a, "image/jpeg", bytes_r, "image/jpeg")
+
+    #ubigeo_titular = _buscar_ubigeo(cur, datos_dni.get("distrito"), datos_dni.get("provincia"), datos_dni.get("departamento"))
+    ubigeo_titular = _formatear_ubigeo_texto(datos_dni.get("distrito"), datos_dni.get("provincia"), datos_dni.get("departamento"))
+
+    apellidos_completos = (datos_dni.get("apellidos") or "").strip()
+    partes_apellido = apellidos_completos.split(" ", 1)
+    apellido_paterno = partes_apellido[0] if partes_apellido else ""
+    apellido_materno = partes_apellido[1] if len(partes_apellido) > 1 else ""
+
+    dni_ocr = (datos_dni.get("n_documento") or "").strip()
+    coincide_dni = (not dni_ocr) or (dni_ocr == dni)
+
+    sexo_ocr = datos_dni.get("sexo")
+    estado_civil_ocr = datos_dni.get("estado_civil")
+    nacionalidad_ocr = _mapear_nacionalidad(datos_dni.get("nacionalidad"))
+
+    cur.execute("""
+        UPDATE afiliacion_solicitudes SET
+            titular_apellido_paterno = %s, titular_apellido_materno = %s, titular_nombres = %s,
+            titular_fecha_nacimiento = %s, titular_tipo_documento = %s, titular_num_documento = %s,
+            titular_direccion = %s, titular_distrito = %s, titular_provincia = %s,
+            titular_departamento = %s, titular_ubigeo = %s, titular_celular = %s, titular_email = %s,
+            titular_sexo = COALESCE(%s, titular_sexo),
+            titular_estado_civil = COALESCE(%s, titular_estado_civil),
+            titular_nacionalidad = COALESCE(%s, titular_nacionalidad),
+            paso_actual = GREATEST(paso_actual, 3)
+        WHERE id = %s
+    """, (
+        apellido_paterno, apellido_materno, datos_dni.get("nombres"),
+        datos_dni.get("fecha_nacimiento"), datos_dni.get("tipo_documento") or "DNI", dni,
+        datos_dni.get("domicilio"), datos_dni.get("distrito"), datos_dni.get("provincia"),
+        datos_dni.get("departamento"), ubigeo_titular, celular, correo,
+        sexo_ocr, estado_civil_ocr, nacionalidad_ocr,
+        solicitud_id
+    ))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "ok": True,
+        "solicitud_id": solicitud_id,
+        "token": token,
+        "coincide_dni_ocr": coincide_dni,
+        "celular_guardado": celular,
+        "campos_extraidos": {
+            "nombres": datos_dni.get("nombres"),
+            "apellido_paterno": apellido_paterno,
+            "apellido_materno": apellido_materno,
+            "fecha_nacimiento": datos_dni.get("fecha_nacimiento"),
+            "distrito": datos_dni.get("distrito"),
+            "sexo": sexo_ocr,
+            "estado_civil": estado_civil_ocr,
+            "nacionalidad": nacionalidad_ocr,
+        },
+        "faltan_por_completar_manualmente": {
+            "sexo": sexo_ocr is None,
+            "estado_civil": estado_civil_ocr is None,
+            "nacionalidad": nacionalidad_ocr is None,
+        },
+    }, ensure_ascii=False), 200, HEADERS)
+
+PARENTESCOS_VALIDOS = {"CONYUGE", "CONVIVIENTE", "HIJO", "HIJO_INCAPACITADO"}
+
+@con_log_errores
+def handle_registrar_dependiente_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    parentesco = (data.get("parentesco") or "").strip().upper()
+    url_dni_anverso = data.get("url_dni_anverso")
+    url_dni_reverso = data.get("url_dni_reverso")
+
+    if not token or not parentesco or not url_dni_anverso:
+        return (json.dumps({
+            "error": "token, parentesco y url_dni_anverso son obligatorios"
+        }), 400, HEADERS)
+    if parentesco not in PARENTESCOS_VALIDOS:
+        return (json.dumps({"error": f"parentesco debe ser uno de: {', '.join(PARENTESCOS_VALIDOS)}"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, estado FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    solicitud_id, estado = row
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"La solicitud ya no está en proceso (estado: {estado})"}), 409, HEADERS)
+
+    # ── Asignar el siguiente código disponible (D1-D4) ──
+    cur.execute("""
+        SELECT codigo FROM afiliacion_dependientes WHERE solicitud_id = %s
+    """, (solicitud_id,))
+    codigos_usados = {r[0] for r in cur.fetchall()}
+    codigo_asignado = None
+    for candidato in ("D1", "D2", "D3", "D4"):
+        if candidato not in codigos_usados:
+            codigo_asignado = candidato
+            break
+
+    if not codigo_asignado:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Ya se registraron los 4 dependientes máximos permitidos"}), 409, HEADERS)
+
+    # ── Descargar imágenes ──
+    try:
+        resp_a = requests.get(url_dni_anverso, timeout=20)
+        resp_a.raise_for_status()
+        bytes_a = resp_a.content
+
+        bytes_r = None
+        if url_dni_reverso:
+            resp_r = requests.get(url_dni_reverso, timeout=20)
+            resp_r.raise_for_status()
+            bytes_r = resp_r.content
+    except Exception as e:
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"No se pudo descargar alguna imagen: {str(e)}"}), 500, HEADERS)
+
+    # ── OCR + Gemini PRIMERO (aquí sale el DNI, ya no viene del body) ──
+    datos_dni = extraer_datos_dni(bytes_a, "image/jpeg", bytes_r, "image/jpeg" if bytes_r else None)
+
+    dni_dependiente = (datos_dni.get("n_documento") or "").strip()
+    if not dni_dependiente:
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": "No se pudo leer el número de documento en la foto. Pide una foto más clara del DNI (anverso) e intenta de nuevo."
+        }), 422, HEADERS)
+
+    # ── Evitar registrar el mismo DNI dos veces como dependiente ──
+    cur.execute("""
+        SELECT codigo FROM afiliacion_dependientes
+        WHERE solicitud_id = %s AND num_documento = %s
+    """, (solicitud_id, dni_dependiente))
+    ya_existe = cur.fetchone()
+    if ya_existe:
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": f"Este DNI ya fue registrado como dependiente {ya_existe[0]} en esta solicitud"
+        }), 409, HEADERS)
+
+    # ── Subir a Cloud Storage (bucket privado) ──
+    bucket_name = os.environ.get("BUCKET_AFILIACION", "sanitas-afiliacion-docs")
+    bucket = storage_client.bucket(bucket_name)
+
+    blob_a = bucket.blob(f"afiliacion-regular/{token}/{codigo_asignado}_DNI_ANVERSO.jpg")
+    blob_a.upload_from_string(bytes_a, content_type="image/jpeg")
+    ruta_a = f"gs://{bucket_name}/afiliacion-regular/{token}/{codigo_asignado}_DNI_ANVERSO.jpg"
+
+    ruta_r = None
+    if bytes_r:
+        blob_r = bucket.blob(f"afiliacion-regular/{token}/{codigo_asignado}_DNI_REVERSO.jpg")
+        blob_r.upload_from_string(bytes_r, content_type="image/jpeg")
+        ruta_r = f"gs://{bucket_name}/afiliacion-regular/{token}/{codigo_asignado}_DNI_REVERSO.jpg"
+
+    cur.execute("""
+        INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+        VALUES (%s, %s, 'DNI_ANVERSO', %s)
+    """, (solicitud_id, codigo_asignado, ruta_a))
+    if ruta_r:
+        cur.execute("""
+            INSERT INTO afiliacion_documentos (solicitud_id, persona_codigo, tipo_documento, ruta_storage)
+            VALUES (%s, %s, 'DNI_REVERSO', %s)
+        """, (solicitud_id, codigo_asignado, ruta_r))
+    conn.commit()
+
+    apellidos_completos = (datos_dni.get("apellidos") or "").strip()
+    partes_apellido = apellidos_completos.split(" ", 1)
+    apellido_paterno = partes_apellido[0] if partes_apellido else ""
+    apellido_materno = partes_apellido[1] if len(partes_apellido) > 1 else ""
+    sexo_ocr = datos_dni.get("sexo")
+    estado_civil_ocr = datos_dni.get("estado_civil")
+    nacionalidad_ocr = _mapear_nacionalidad(datos_dni.get("nacionalidad"))
+
+    # El dependiente SIEMPRE hereda el mismo texto de ubicación que el titular,
+    # sin importar lo que su propio DNI diga (ya no se calcula por OCR propio).
+    cur.execute("SELECT titular_ubigeo FROM afiliacion_solicitudes WHERE id = %s", (solicitud_id,))
+    row_ubigeo_titular = cur.fetchone()
+    ubigeo_dependiente = row_ubigeo_titular[0] if row_ubigeo_titular else None
+
+    cur.execute("""
+        INSERT INTO afiliacion_dependientes
+            (solicitud_id, codigo, apellido_paterno, apellido_materno, nombres,
+             sexo, fecha_nacimiento, tipo_documento, num_documento, parentesco,
+             nacionalidad, ubigeo, estado_civil)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        solicitud_id, codigo_asignado, apellido_paterno, apellido_materno,
+        datos_dni.get("nombres"), sexo_ocr, datos_dni.get("fecha_nacimiento"),
+        datos_dni.get("tipo_documento") or "DNI", dni_dependiente, parentesco,
+        nacionalidad_ocr, ubigeo_dependiente, estado_civil_ocr
+    ))
+
+    cur.execute("""
+        UPDATE afiliacion_solicitudes SET paso_actual = GREATEST(paso_actual, 4) WHERE id = %s
+    """, (solicitud_id,))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "ok": True,
+        "solicitud_id": solicitud_id,
+        "persona_codigo": codigo_asignado,
+        "campos_extraidos": {
+            "nombres": datos_dni.get("nombres"),
+            "apellido_paterno": apellido_paterno,
+            "apellido_materno": apellido_materno,
+            "num_documento": dni_dependiente,
+            "fecha_nacimiento": datos_dni.get("fecha_nacimiento"),
+            "parentesco": parentesco,
+            "sexo": sexo_ocr,
+            "nacionalidad": nacionalidad_ocr,
+            "estado_civil": estado_civil_ocr,
+        },
+        "falta_completar_sexo_manualmente": sexo_ocr is None,
+        "falta_completar_nacionalidad_manualmente": nacionalidad_ocr is None,
+    }, ensure_ascii=False), 200, HEADERS)
+
+def handle_ver_wizard_afiliacion(request, token):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, estado, plan, titular_apellido_paterno, titular_apellido_materno,
+               titular_nombres, titular_sexo, titular_estado_civil, titular_num_documento,
+               ruc, titular_ubigeo
+        FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return (_pagina_mensaje("Enlace no válido", "Este enlace expiró o no es correcto. Contáctanos por WhatsApp si necesitas ayuda."), 404, {"Content-Type": "text/html; charset=utf-8"})
+
+    (solicitud_id, estado, plan, apellido_paterno, apellido_materno, nombres, sexo, estado_civil,
+     num_documento, ruc, titular_ubigeo) = row
+
+    if estado == "COMPLETADA":
+        cur.close(); conn.close()
+        return (_pagina_mensaje("¡Ya completaste tu solicitud!", "Revisa tu correo para ver la constancia de tu afiliación."), 200, {"Content-Type": "text/html; charset=utf-8"})
+
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (_pagina_mensaje("Solicitud no disponible", f"Esta solicitud está en estado: {estado}. Contáctanos por WhatsApp si necesitas ayuda."), 200, {"Content-Type": "text/html; charset=utf-8"})
+
+    cur.execute("""
+        SELECT codigo, apellido_paterno, apellido_materno, nombres, sexo, parentesco, ubigeo, estado_civil
+        FROM afiliacion_dependientes WHERE solicitud_id = %s ORDER BY codigo
+    """, (solicitud_id,))
+    dep_rows = cur.fetchall()
+
+    dependientes = [
+        {
+            "codigo": d[0], "apellido_paterno": d[1], "apellido_materno": d[2],
+            "nombres": d[3], "sexo": d[4], "parentesco": d[5], "ubigeo": d[6],
+            "estado_civil": d[7],
+        }
+        for d in dep_rows
+    ]
+
+    # sexo se conserva en el diccionario (lo usa la declaración de salud para
+    # filtrar la pregunta de embarazo), pero YA NO se pide/edita en el wizard.
+    personas = [{
+        "codigo": "T",
+        "nombre_completo": f"{nombres or ''} {apellido_paterno or ''} {apellido_materno or ''}".strip(),
+        "sexo": sexo,
+        "estado_civil": estado_civil,
+        "es_titular": True,
+    }] + [
+        {
+            "codigo": d["codigo"],
+            "nombre_completo": f"{d['nombres'] or ''} {d['apellido_paterno'] or ''} {d['apellido_materno'] or ''}".strip(),
+            "sexo": d["sexo"],
+            "es_titular": False,
+            "parentesco": d["parentesco"],
+            "estado_civil": d["estado_civil"],
+        }
+        for d in dependientes
+    ]
+
+    # ── Documento civil: se solicita UNA sola vez por solicitud, no por persona ──
+    MAPA_DOCUMENTO_CIVIL = {"CASADO": "PARTIDA_MATRIMONIO", "CONVIVIENTE": "UNION_DE_HECHO"}
+
+    tipos_civiles_requeridos = sorted({
+        MAPA_DOCUMENTO_CIVIL[p["estado_civil"]]
+        for p in personas
+        if p.get("estado_civil") in MAPA_DOCUMENTO_CIVIL
+    })
+
+    cur.execute("""
+        SELECT DISTINCT tipo_documento FROM afiliacion_documentos
+        WHERE solicitud_id = %s AND tipo_documento IN ('PARTIDA_MATRIMONIO', 'UNION_DE_HECHO')
+    """, (solicitud_id,))
+    tipos_civiles_subidos = {r[0] for r in cur.fetchall()}
+
+    documentos_civiles = [
+        {"tipo": tipo, "subido": tipo in tipos_civiles_subidos}
+        for tipo in tipos_civiles_requeridos
+    ]
+    faltan_documentos_civiles = any(not d["subido"] for d in documentos_civiles)
+
+    # ── NUEVO: Carné de CONADIS -- uno por cada dependiente HIJO_INCAPACITADO ──
+    mapa_dependientes = {d["codigo"]: d for d in dependientes}
+    codigos_incapacitados = [
+        d["codigo"] for d in dependientes if d["parentesco"] == "HIJO_INCAPACITADO"
+    ]
+
+    conadis_subidos = set()
+    if codigos_incapacitados:
+        cur.execute("""
+            SELECT DISTINCT persona_codigo FROM afiliacion_documentos
+            WHERE solicitud_id = %s AND tipo_documento = 'CARNET_CONADIS'
+              AND persona_codigo = ANY(%s)
+        """, (solicitud_id, codigos_incapacitados))
+        conadis_subidos = {r[0] for r in cur.fetchall()}
+
+    documentos_conadis = [
+        {
+            "persona_codigo": cod,
+            "nombre_completo": f"{mapa_dependientes[cod].get('nombres') or ''} "
+                                f"{mapa_dependientes[cod].get('apellido_paterno') or ''} "
+                                f"{mapa_dependientes[cod].get('apellido_materno') or ''}".strip(),
+            "subido": cod in conadis_subidos,
+        }
+        for cod in codigos_incapacitados
+    ]
+    faltan_documentos_conadis = any(not d["subido"] for d in documentos_conadis)
 
     cur.close(); conn.close()
-    return (json.dumps({
-        "ruc": ruc, "razon_social": razon_social, "direccion": direccion,
-        "departamento": departamento, "provincia": provincia, "distrito": distrito
-    }, ensure_ascii=False), 200, HEADERS)
+
+    # Ya no se exige sexo ni ubigeo (se obtienen de la foto del documento
+    # en el registro de titular/dependiente, sin intervención manual).
+    faltan_datos_basicos = (
+        (not plan) or (not estado_civil)
+        or any(not p.get("estado_civil") for p in personas)
+        or faltan_documentos_civiles
+        or faltan_documentos_conadis  # ← NUEVO
+    )
+
+    template = jinja_env.get_template("wizard_afiliacion.html")
+    html_renderizado = template.render(
+        token=token,
+        personas=personas,
+        faltan_datos_basicos=faltan_datos_basicos,
+        plan_actual=plan or "",
+        titular_estado_civil=estado_civil or "",
+        documentos_civiles=documentos_civiles,
+        documentos_conadis=documentos_conadis,  # ← NUEVO
+        preguntas_salud=PREGUNTAS_SALUD,
+    )
+
+    return (html_renderizado, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+@con_log_errores
+def handle_completar_datos_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    plan = data.get("plan")
+    titular_sexo = data.get("titular_sexo")
+    titular_estado_civil = data.get("titular_estado_civil")
+    titular_ubigeo = data.get("titular_ubigeo")
+    dependientes = data.get("dependientes") or []
+
+    if not token:
+        return (json.dumps({"error": "token es obligatorio"}), 400, HEADERS)
+
+    ESTADOS_CIVILES_VALIDOS = {"SOLTERO", "CASADO", "VIUDO", "DIVORCIADO", "CONVIVIENTE"}
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, estado FROM afiliacion_solicitudes WHERE token = %s", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    solicitud_id, estado = row
+    if estado != "EN_PROCESO":
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"La solicitud ya no está en proceso (estado: {estado})"}), 409, HEADERS)
+
+    cur.execute("""
+        UPDATE afiliacion_solicitudes SET
+            plan = COALESCE(%s, plan),
+            titular_sexo = COALESCE(%s, titular_sexo),
+            titular_estado_civil = COALESCE(%s, titular_estado_civil),
+            titular_ubigeo = COALESCE(%s, titular_ubigeo),
+            paso_actual = GREATEST(paso_actual, 5)
+        WHERE id = %s
+    """, (plan, titular_sexo, titular_estado_civil, titular_ubigeo, solicitud_id))
+
+    for dep in dependientes:
+        codigo = (dep.get("codigo") or "").strip().upper()
+        sexo = dep.get("sexo")
+        ubigeo_dep = dep.get("ubigeo")
+        estado_civil_dep = dep.get("estado_civil")
+
+        if estado_civil_dep and estado_civil_dep not in ESTADOS_CIVILES_VALIDOS:
+            cur.close(); conn.close()
+            return (json.dumps({"error": f"estado_civil de {codigo} no es válido"}), 400, HEADERS)
+
+        if codigo in {"D1", "D2", "D3", "D4"} and (sexo or ubigeo_dep or estado_civil_dep):
+            cur.execute("""
+                UPDATE afiliacion_dependientes SET
+                    sexo = COALESCE(%s, sexo),
+                    ubigeo = COALESCE(%s, ubigeo),
+                    estado_civil = COALESCE(%s, estado_civil)
+                WHERE solicitud_id = %s AND codigo = %s
+            """, (sexo, ubigeo_dep, estado_civil_dep, solicitud_id, codigo))
+
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({"ok": True}), 200, HEADERS)
+
+@con_log_errores
+def handle_reenviar_sms_afiliacion(request):
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("pw") != ADMIN_PW_AFILIACION:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
+    token = (data.get("token") or "").strip()
+    if not token:
+        return (json.dumps({"error": "token es obligatorio"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT estado, celular_origen_wsp, titular_nombres
+        FROM afiliacion_solicitudes WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+
+    if not row:
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    estado, celular_origen_wsp, titular_nombres = row
+
+    if estado != "EN_PROCESO":
+        return (json.dumps({
+            "error": f"Solo se puede reenviar el link para solicitudes EN_PROCESO (estado actual: {estado})"
+        }), 409, HEADERS)
+
+    if not celular_origen_wsp:
+        return (json.dumps({"error": "Esta solicitud no tiene celular registrado"}), 409, HEADERS)
+
+    numero = _normalizar_celular_pe(celular_origen_wsp)
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link = f"{base_url}/afiliacion/{token}"
+    nombre_limpio = _limpiar_nombre_sms(titular_nombres or "")
+    saludo = f"Hola {nombre_limpio}, " if nombre_limpio else "Hola, "
+    mensaje = f"Sanitas: {saludo}completa tu solicitud de afiliación aquí: {link}"
+
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "afiliacion reenvio link")
+
+    return (json.dumps({"ok": True, "celular": numero}), 200, HEADERS)
+
+"""
+handle_reporte_afiliacion
+-----------------------------
+Panel de reporte de solicitudes de afiliación. Mismo patrón de seguridad
+que /programa-cronico/reporte y /campania/*: password por query string
+(?pw=...), comparado contra una variable de entorno.
+
+Ruta sugerida: GET /afiliacion/reporte?pw=...
+
+IMPORTANTE: agregar la ruta ANTES del catch-all
+    elif request.path.startswith("/afiliacion/") and request.method == "GET":
+en el router, o como un elif exacto de path == "/afiliacion/reporte" en
+cualquier posición previa a ese catch-all (el orden del if/elif ya lo
+resuelve solo, ya que Python evalúa de arriba hacia abajo).
+
+Requiere la variable de entorno ADMIN_PW_AFILIACION (Secret Manager o
+env var directa, igual que ADMIN_PW_CRONICO / AGENTE_KB_CLAVE).
+"""
+
+ADMIN_PW_AFILIACION = os.environ.get("ADMIN_PW_AFILIACION")
+
+@con_log_errores
+def handle_reporte_afiliacion(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_AFILIACION:
+        return ("No autorizado", 401, {"Content-Type": "text/html; charset=utf-8"})
+
+    filtro_estado = request.args.get("estado", "")
+    filtro_busqueda = request.args.get("q", "").strip()
+    fecha_inicio = request.args.get("fecha_inicio", "").strip()
+    fecha_fin = request.args.get("fecha_fin", "").strip()
+
+    conn = get_connection()
+    with conn.cursor() as cur:
+        query = """
+            SELECT
+                s.token, s.tipo_solicitud, s.plan, s.estado,
+                s.titular_num_documento, s.titular_nombres,
+                s.titular_apellido_paterno, s.titular_apellido_materno,
+                s.celular_origen_wsp, s.titular_email,
+                s.ruc, e.razon_social,
+                s.fecha_creacion, s.fecha_completada, s.ruta_pdf_final,
+                (SELECT COUNT(*) FROM afiliacion_dependientes d WHERE d.solicitud_id = s.id) AS num_dependientes
+            FROM afiliacion_solicitudes s
+            LEFT JOIN sctr_empresa e ON e.ruc = s.ruc
+            WHERE 1=1
+        """
+        params = []
+
+        if filtro_estado:
+            query += " AND s.estado = %s"
+            params.append(filtro_estado)
+
+        if filtro_busqueda:
+            query += """ AND (
+                s.titular_num_documento ILIKE %s OR
+                s.titular_nombres ILIKE %s OR
+                s.titular_apellido_paterno ILIKE %s OR
+                s.titular_apellido_materno ILIKE %s OR
+                s.celular_origen_wsp ILIKE %s OR
+                e.razon_social ILIKE %s
+            )"""
+            comodin = f"%{filtro_busqueda}%"
+            params.extend([comodin] * 6)
+
+        if fecha_inicio:
+            query += " AND s.fecha_creacion >= %s"
+            params.append(fecha_inicio)
+
+        if fecha_fin:
+            query += " AND s.fecha_creacion < (%s::date + INTERVAL '1 day')"
+            params.append(fecha_fin)
+
+        query += " ORDER BY s.fecha_creacion DESC LIMIT 500"
+        cur.execute(query, params)
+        registros = cur.fetchall()
+    conn.close()
+
+    COLOR_ESTADO = {
+        "COMPLETADA": "#2e7d32",
+        "EN_PROCESO": "#0090A6",
+        "VENCIDA": "#c62828",
+    }
+
+    filas_html = ""
+    for row in registros:
+        (token, tipo_solicitud, plan, estado, num_documento, nombres,
+         apellido_paterno, apellido_materno, celular, email,
+         ruc, razon_social, fecha_creacion, fecha_completada, ruta_pdf_final,
+         num_dependientes) = row
+        color_estado = COLOR_ESTADO.get(estado, "#555")
+        nombre_completo = f"{nombres or ''} {apellido_paterno or ''} {apellido_materno or ''}".strip() or "—"
+
+        links = [f'<a href="/afiliacion/{token}" target="_blank">Ver wizard</a>']
+        if ruta_pdf_final:
+            url_firmada = generar_url_firmada_afiliacion(ruta_pdf_final, minutos_expiracion=30)
+            if url_firmada:
+                links.append(f'<a href="{url_firmada}" target="_blank"><strong>PDF</strong></a>')
+        links_html = " · ".join(links)
+
+        btn_sms_html = "—"
+        if estado == "EN_PROCESO" and celular:
+            btn_sms_html = f'<button class="btn-sms" data-token="{token}" onclick="reenviarSMS(this)">📲 Enviar SMS</button>'
+
+        filas_html += f"""
+        <tr>
+            <td>{fecha_creacion.strftime('%d/%m/%Y %H:%M') if fecha_creacion else '—'}</td>
+            <td>{nombre_completo}<br><span style="font-size:12px;color:#888;">{num_documento or ''}</span></td>
+            <td>{celular or '—'}<br><span style="font-size:12px;color:#888;">{email or ''}</span></td>
+            <td>{razon_social or '—'}<br><span style="font-size:12px;color:#888;">{ruc or ''}</span></td>
+            <td>{plan or '—'}</td>
+            <td>{tipo_solicitud or '—'}</td>
+            <td style="text-align:center;">{num_dependientes}</td>
+            <td><span style="color:{color_estado};font-weight:600;">{estado}</span></td>
+            <td>{links_html}</td>
+            <td>{btn_sms_html}</td>
+            <td><span style="font-size:11px;color:#aaa;">{token}</span></td>
+        </tr>"""
+
+    opciones_estado = ["", "EN_PROCESO", "COMPLETADA", "VENCIDA"]
+    opciones_estado_html = "".join(
+        f'<option value="{e}" {"selected" if e == filtro_estado else ""}>{e or "Todos"}</option>'
+        for e in opciones_estado
+    )
+
+    # ── Construye el link de descarga de Excel arrastrando los mismos filtros activos ──
+    from urllib.parse import urlencode
+    params_excel = {"pw": pw}
+    if filtro_busqueda:
+        params_excel["q"] = filtro_busqueda
+    if fecha_inicio:
+        params_excel["fecha_inicio"] = fecha_inicio
+    if fecha_fin:
+        params_excel["fecha_fin"] = fecha_fin
+    url_excel = f"/afiliacion/reporte-excel?{urlencode(params_excel)}"
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Reporte de Afiliaciones</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 20px; color: #222; }}
+    h1 {{ color: #0090A6; font-size: 20px; margin-bottom: 4px; }}
+    .subtitulo {{ color: #888; font-size: 13px; margin-bottom: 20px; }}
+    .filtros {{ background: #fff; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; display: flex; gap: 12px; align-items: end; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    .filtros label {{ font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px; }}
+    .filtros input, .filtros select {{ padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }}
+    .filtros button {{ padding: 8px 16px; background: #0090A6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }}
+    .btn-excel {{ padding: 8px 16px; background: #2e7d32; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-block; }}
+    .btn-excel:hover {{ background: #256428; text-decoration: none; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+    th {{ background: #0090A6; color: #fff; text-align: left; padding: 10px 12px; font-size: 12px; }}
+    td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #eee; vertical-align: top; }}
+    tr:hover {{ background: #f0f7f8; }}
+    .contador {{ font-size: 12px; color: #888; margin-bottom: 10px; }}
+    a {{ color: #0090A6; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .btn-sms {{ padding: 6px 12px; background: #0090A6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }}
+    .btn-sms:hover {{ background: #007686; }}
+    .btn-sms:disabled {{ background: #9bb6d6; cursor: not-allowed; }}
+</style>
+</head>
+<body>
+
+<h1>Reporte — Afiliación Regular</h1>
+<div class="subtitulo">Solicitudes de titulares y sus dependientes</div>
+
+<form class="filtros" method="GET" action="/afiliacion/reporte">
+    <input type="hidden" name="pw" value="{pw}">
+    <div>
+        <label>Buscar (DNI, nombre, celular, empresa)</label>
+        <input type="text" name="q" value="{filtro_busqueda}" placeholder="Ej. 47313070">
+    </div>
+    <div>
+        <label>Estado</label>
+        <select name="estado">{opciones_estado_html}</select>
+    </div>
+    <div>
+        <label>Desde</label>
+        <input type="date" name="fecha_inicio" value="{fecha_inicio}">
+    </div>
+    <div>
+        <label>Hasta</label>
+        <input type="date" name="fecha_fin" value="{fecha_fin}">
+    </div>
+    <button type="submit">Filtrar</button>
+    <a class="btn-excel" href="{url_excel}">📥 Descargar Excel</a>
+</form>
+
+<div class="contador">{len(registros)} registro(s) (máx. 500)</div>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>Fecha</th>
+            <th>Titular</th>
+            <th>Contacto</th>
+            <th>Empresa</th>
+            <th>Plan</th>
+            <th>Tipo</th>
+            <th>Dependientes</th>
+            <th>Estado</th>
+            <th>Enlaces</th>
+            <th>SMS</th>
+            <th>Token</th>
+        </tr>
+    </thead>
+    <tbody>
+        {filas_html}
+    </tbody>
+</table>
+</div>
+<script>
+async function reenviarSMS(btn) {{
+    const token = btn.dataset.token;
+    if (!confirm("¿Enviar SMS con el link de afiliación a este celular?")) return;
+
+    btn.disabled = true;
+    btn.textContent = "Enviando...";
+
+    try {{
+        const resp = await fetch("/afiliacion/reenviar-sms", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ pw: "{pw}", token: token }})
+        }});
+        const data = await resp.json();
+
+        if (resp.ok && data.ok) {{
+            btn.textContent = "✓ Enviado";
+        }} else {{
+            alert("Error: " + (data.error || "No se pudo enviar"));
+            btn.disabled = false;
+            btn.textContent = "📲 Enviar SMS";
+        }}
+    }} catch (e) {{
+        alert("Error de conexión");
+        btn.disabled = false;
+        btn.textContent = "📲 Enviar SMS";
+    }}
+}}
+</script>
+</body>
+</html>"""
+
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+# Lista de campos en la cabecera para generar la trama (excel)
+REPORTE_EXCEL_HEADERS = [
+    "PLAN*",
+    "VIGENCIA*",
+    "TIPO DOCUMENTO TITULAR*",
+    "NÚMERO DOCUMENTO DEL TITULAR*",
+    "TIPO DOCUMENTO USUARIO*",
+    "NÚMERO DOCUMENTO DE IDENTIDAD DEL USUARIO*",
+    "1ER NOMBRE*",
+    "2DO NOMBRE O MAS NOMBRES*",
+    "1ER APELLIDO*",
+    "2DO APELLIDO O MAS APELLIDOS*",
+    "SEXO*",
+    "FECHA DE NACIMIENTO*",
+    "PAIS DE ORIGEN (NACIONALIDAD)*",
+    "ESTADO CIVIL*",
+    "PARENTESCO*",
+    "TIPO VIA*",
+    "DIRECCION*",
+    "NUMERO*",
+    "UBIGEO*",
+    "TELEFONO FIJO*",
+    "CELULAR*",
+    "E-MAIL*",
+    "TIPO*",
+    "ANTERIOR ASEGURADOR SALUD*",
+    "ANTERIOR EPS*",
+    "FECHA INICIO EPS*",
+    "FECHA FIN EPS*",
+    "CONTACTO REFERENTE*",
+]
+
+# Prefijos de tipo de vía reconocidos al inicio de titular_direccion
+_TIPOS_VIA_REPORTE = [
+    "AV.", "AV", "JR.", "JR", "CALLE", "CA.", "CA", "PSJE.", "PSJE",
+    "PASAJE", "PROLONG.", "PROLONGACION", "PROLONGACIÓN", "MZ.", "MZ",
+    "URB.", "URB", "ALAMEDA", "MALECON", "MALECÓN",
+]
+_TIPO_VIA_REGEX_REPORTE = re.compile(
+    r"^\s*(" + "|".join(re.escape(t) for t in _TIPOS_VIA_REPORTE) + r")\.?\s+",
+    re.IGNORECASE,
+)
+_NUMERO_REGEX_REPORTE = re.compile(r"\b(\d+)\b")
+
+
+def _parsear_direccion_reporte(direccion_raw):
+    """
+    'JR. ALMIRANTE GUISSE 1904' -> ('JR', 'ALMIRANTE GUISSE', '1904')
+    'AV. PASEO DE LA REPUBLICA 6339 DPTO. 1204'
+        -> ('AV', 'PASEO DE LA REPUBLICA DPTO. 1204', '6339')
+    'LOS PRECURSORES 453 DPT.101' -> ('', 'LOS PRECURSORES DPT.101', '453')
+    """
+    if not direccion_raw:
+        return "", "", ""
+
+    texto = direccion_raw.strip()
+
+    tipo_via = ""
+    m = _TIPO_VIA_REGEX_REPORTE.match(texto)
+    if m:
+        tipo_via = m.group(1).rstrip(".").upper()
+        texto = texto[m.end():].strip()
+
+    numero = ""
+    m_num = _NUMERO_REGEX_REPORTE.search(texto)
+    if m_num:
+        numero = m_num.group(1)
+        antes = texto[: m_num.start()].strip()
+        despues = texto[m_num.end():].strip()
+        direccion = " ".join(p for p in [antes, despues] if p).strip()
+    else:
+        direccion = texto
+
+    return tipo_via, direccion, numero
+
+
+def _separar_nombres_reporte(nombres_raw):
+    """1er nombre = primera palabra; 2do nombre o más = el resto."""
+    if not nombres_raw:
+        return "", ""
+    partes = nombres_raw.strip().split()
+    if not partes:
+        return "", ""
+    return partes[0], " ".join(partes[1:])
+
+
+def _calcular_vigencia_reporte(fecha_completada):
+    """
+    La vigencia siempre es el primer día del mismo mes en que se completó
+    la solicitud (firma), sin importar si fue el día 1 o el día 31.
+    Ej: completada el 08/08/2026 -> vigencia 01/08/2026.
+        completada el 31/08/2026 -> vigencia 01/08/2026.
+    """
+    if not fecha_completada:
+        return None
+
+    f = fecha_completada.date() if hasattr(fecha_completada, "date") else fecha_completada
+    return date(f.year, f.month, 1)
+
+
+def _contacto_referente_reporte(celular_origen_wsp):
+    return "SI" if celular_origen_wsp else "NO"
+
+
+def _obtener_datos_reporte_afiliacion(cur, fecha_inicio=None, fecha_fin=None, busqueda=None):
+    query = """
+        SELECT s.id, s.plan, s.titular_tipo_documento, s.titular_num_documento,
+               s.titular_nombres, s.titular_apellido_paterno, s.titular_apellido_materno,
+               s.titular_sexo, s.titular_fecha_nacimiento, s.titular_nacionalidad,
+               s.titular_estado_civil, s.titular_direccion, s.titular_ubigeo, s.titular_telefono,
+               s.titular_celular, s.celular_origen_wsp, s.titular_email, s.fecha_completada
+        FROM afiliacion_solicitudes s
+        LEFT JOIN sctr_empresa e ON e.ruc = s.ruc
+        WHERE s.estado = 'COMPLETADA'
+    """
+    params = []
+
+    if fecha_inicio:
+        query += " AND s.fecha_creacion >= %s"
+        params.append(fecha_inicio)
+
+    if fecha_fin:
+        query += " AND s.fecha_creacion < (%s::date + INTERVAL '1 day')"
+        params.append(fecha_fin)
+
+    if busqueda:
+        query += """ AND (
+            s.titular_num_documento ILIKE %s OR
+            s.titular_nombres ILIKE %s OR
+            s.titular_apellido_paterno ILIKE %s OR
+            s.titular_apellido_materno ILIKE %s OR
+            s.celular_origen_wsp ILIKE %s OR
+            e.razon_social ILIKE %s
+        )"""
+        comodin = f"%{busqueda}%"
+        params.extend([comodin] * 6)
+
+    query += " ORDER BY s.id"
+    cur.execute(query, params)
+
+    col_sol = [d[0] for d in cur.description]
+    solicitudes = [dict(zip(col_sol, r)) for r in cur.fetchall()]
+
+    ids = [s["id"] for s in solicitudes]
+    if not ids:
+        return solicitudes, {}, {}
+
+    cur.execute("""
+        SELECT solicitud_id, codigo, apellido_paterno, apellido_materno, nombres,
+               sexo, fecha_nacimiento, tipo_documento, num_documento, parentesco,
+               nacionalidad, ubigeo, estado_civil
+        FROM afiliacion_dependientes
+        WHERE solicitud_id = ANY(%s)
+        ORDER BY solicitud_id, id
+    """, (ids,))
+
+    col_dep = [d[0] for d in cur.description]
+    dependientes_por_solicitud = {}
+    for r in cur.fetchall():
+        dep = dict(zip(col_dep, r))
+        dependientes_por_solicitud.setdefault(dep["solicitud_id"], []).append(dep)
+
+    cur.execute("""
+        SELECT DISTINCT ON (solicitud_id, persona_codigo)
+               solicitud_id, persona_codigo, tipo_seguro, modalidad,
+               asegurador_anterior, fecha_desde, fecha_hasta
+        FROM afiliacion_antecedentes_seguro
+        WHERE solicitud_id = ANY(%s)
+        ORDER BY solicitud_id, persona_codigo, id DESC
+    """, (ids,))
+    col_ant = [d[0] for d in cur.description]
+    antecedentes_por_key = {}
+    for r in cur.fetchall():
+        ant = dict(zip(col_ant, r))
+        antecedentes_por_key[(ant["solicitud_id"], ant["persona_codigo"])] = ant
+
+    return solicitudes, dependientes_por_solicitud, antecedentes_por_key
+
+
+def _fila_antecedente_reporte(ant):
+    if not ant:
+        return "", "", "", "", ""
+    return (
+        ant.get("tipo_seguro") or "",
+        ant.get("modalidad") or "",
+        ant.get("asegurador_anterior") or "",
+        ant.get("fecha_desde"),
+        ant.get("fecha_hasta"),
+    )
+
+
+def _construir_filas_reporte_afiliacion(solicitudes, dependientes_por_solicitud, antecedentes_por_key):
+    filas = []
+
+    for sol in solicitudes:
+        vigencia = _calcular_vigencia_reporte(sol["fecha_completada"])
+        tipo_via, direccion, numero = _parsear_direccion_reporte(sol["titular_direccion"])
+        primer_nombre, resto_nombres = _separar_nombres_reporte(sol["titular_nombres"])
+        referente = _contacto_referente_reporte(sol["celular_origen_wsp"])
+
+        ant_titular = antecedentes_por_key.get((sol["id"], "T"))
+        tipo, ant_asegurador_salud, ant_eps, f_inicio, f_fin = _fila_antecedente_reporte(ant_titular)
+
+        # ── Fila del titular ──
+        filas.append([
+            sol["plan"] or "",
+            vigencia,
+            sol["titular_tipo_documento"] or "",
+            sol["titular_num_documento"] or "",
+            sol["titular_tipo_documento"] or "",
+            sol["titular_num_documento"] or "",
+            primer_nombre,
+            resto_nombres,
+            sol["titular_apellido_paterno"] or "",
+            sol["titular_apellido_materno"] or "",
+            sol["titular_sexo"] or "",
+            sol["titular_fecha_nacimiento"],
+            sol["titular_nacionalidad"] or "",
+            sol["titular_estado_civil"] or "",
+            "TITULAR",
+            tipo_via,
+            direccion,
+            numero,
+            sol["titular_ubigeo"] or "",
+            sol["titular_telefono"] or "",
+            sol["celular_origen_wsp"] or "",  
+            sol["titular_email"] or "",
+            tipo,
+            ant_asegurador_salud,
+            ant_eps,
+            f_inicio,
+            f_fin,
+            referente,
+        ])
+
+        # ── Filas de dependientes ──
+        for dep in dependientes_por_solicitud.get(sol["id"], []):
+            primer_nombre_dep, resto_nombres_dep = _separar_nombres_reporte(dep["nombres"])
+            ant_dep = antecedentes_por_key.get((sol["id"], dep["codigo"]))
+            tipo_d, ant_asegurador_salud_d, ant_eps_d, f_inicio_d, f_fin_d = _fila_antecedente_reporte(ant_dep)
+
+            filas.append([
+                sol["plan"] or "",
+                vigencia,
+                sol["titular_tipo_documento"] or "",
+                sol["titular_num_documento"] or "",
+                dep["tipo_documento"] or "",
+                dep["num_documento"] or "",
+                primer_nombre_dep,
+                resto_nombres_dep,
+                dep["apellido_paterno"] or "",
+                dep["apellido_materno"] or "",
+                dep["sexo"] or "",
+                dep["fecha_nacimiento"],
+                dep["nacionalidad"] or "",
+                dep["estado_civil"] or "",
+                dep["parentesco"] or "",
+                tipo_via,   # misma dirección del titular
+                direccion,  # misma dirección del titular
+                numero,     # misma dirección del titular
+                dep["ubigeo"] or sol["titular_ubigeo"] or "",
+                sol["titular_telefono"] or "",  # mismo contacto del titular
+                sol["celular_origen_wsp"] or "",
+                sol["titular_email"] or "",
+                tipo_d,
+                ant_asegurador_salud_d,
+                ant_eps_d,
+                f_inicio_d,
+                f_fin_d,
+                referente,
+            ])
+
+    return filas
+
+
+def _generar_excel_reporte_afiliacion(filas):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Reporte Afiliacion"
+
+    header_fill = PatternFill(start_color="00A9B7", end_color="00A9B7", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    for col_idx, header in enumerate(REPORTE_EXCEL_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    date_cols = {2, 12, 26, 27}  # VIGENCIA, FECHA DE NACIMIENTO, FECHA INICIO EPS, FECHA FIN EPS
+
+    for row_idx, fila in enumerate(filas, start=2):
+        for col_idx, valor in enumerate(fila, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+            if col_idx in date_cols and valor:
+                cell.number_format = "DD/MM/YYYY"
+
+    for col_idx, header in enumerate(REPORTE_EXCEL_HEADERS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(18, len(header) * 0.9)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(REPORTE_EXCEL_HEADERS))}1"
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ─────────────────────────────────────────────
+# API: /afiliacion/reporte-excel (GET) — descarga el .xlsx de 28 campos
+# Protegido con ?pw= igual que /afiliacion/reporte
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_reporte_excel_afiliacion(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_AFILIACION:
+        return ("No autorizado", 401, {"Content-Type": "text/html; charset=utf-8"})
+
+    fecha_inicio = request.args.get("fecha_inicio", "").strip()
+    fecha_fin = request.args.get("fecha_fin", "").strip()
+    busqueda = request.args.get("q", "").strip()
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        solicitudes, dependientes_por_solicitud, antecedentes_por_key = _obtener_datos_reporte_afiliacion(
+            cur,
+            fecha_inicio=fecha_inicio or None,
+            fecha_fin=fecha_fin or None,
+            busqueda=busqueda or None,
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+    filas = _construir_filas_reporte_afiliacion(solicitudes, dependientes_por_solicitud, antecedentes_por_key)
+    excel_bytes = _generar_excel_reporte_afiliacion(filas)
+
+    nombre_archivo = f"reporte_afiliacion_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M')}.xlsx"
+
+    return (
+        excel_bytes,
+        200,
+        {
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": f"attachment; filename={nombre_archivo}",
+        },
+    )

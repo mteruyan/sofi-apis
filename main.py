@@ -18,18 +18,20 @@ import hashlib
 import base64
 import traceback
 from functools import wraps
+import functools
 import secrets
 from jinja2 import Environment, FileSystemLoader
 jinja_env = Environment(loader=FileSystemLoader("templates"))
 from google.cloud import storage
 storage_client = storage.Client()
 from weasyprint import HTML
-
 import uuid
 import random
 import string
 import zipfile
+import hmac
 
+from urllib.parse import quote
 import google.auth
 from google.auth.transport import requests as google_auth_requests
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -50,6 +52,16 @@ LIMA_TZ = pytz.timezone("America/Lima")
 DANACONNECT_URL  = "https://appserv.danaconnect.com/api/1.0/rest/conversation/517078/start/data"
 DANACONNECT_AUTH = os.environ["DANACONNECT_AUTH"]
 WHATSAPP_URL     = "wa.me/51955973936"
+TIMEOUT_OFERTA_SEGUNDOS   = 120    # 2 min para que el proveedor acepte/rechace
+MAX_INTENTOS_ASIGNACION   = 5      # después de esto, se marca sin_cobertura
+INCREMENTO_RADIO_METROS   = 2000   # cada reintento amplía el radio de búsqueda
+RADIO_MAXIMO_METROS       = 15000
+
+ESTADOS_VALIDOS = {"NUEVO", "ASIGNADO", "EN_PROCESO", "RESUELTO", "CERRADO"}
+
+WHATSAPP_CLOUD_API_VERSION = "v21.0"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 CAMPANIA_CSS = """
 :root {
@@ -277,7 +289,7 @@ def validar_api_key(request):
 # ─────────────────────────────────────────────
 HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",  
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Content-Type": "application/json"
 }
@@ -299,14 +311,29 @@ def api(request):
     if not request.path.startswith("/sctr/") and not request.path.startswith("/admision/") \
         and not request.path.startswith("/agente_kb/") and not request.path.startswith("/campania/") \
         and not request.path.startswith("/c/") and not request.path.startswith("/static/") \
+        and not request.path.startswith("/s/") \
+        and not request.path.startswith("/ps/") \
+        and not request.path.startswith("/social/") \
         and not request.path.startswith("/assets/") \
+        and not request.path.startswith("/chattigo/") \
+        and not request.path.startswith("/track/") \
+        and not request.path.startswith("/oferta/") \
+        and not request.path.startswith("/proveedor") \
+        and not request.path.startswith("/proveedores/") \
+        and not request.path.startswith("/ofertas/") \
+        and not request.path.startswith("/solicitudes/") \
+        and not request.path.startswith("/backoffice/") \
         and not request.path.startswith("/programa-cronico/firmar-consentimiento") \
         and not request.path.startswith("/programa-cronico/mantenimiento") \
+        and not request.path.startswith("/programa-cronico/reenviar-danaconnect") \
+        and not request.path.startswith("/programa-cronico/reprocesar") \
+        and not request.path.startswith("/programa-cronico/aprobar-manual") \
+        and not request.path.startswith("/programa-cronico/forzar-recordatorio") \
         and not (request.path.startswith("/programa-cronico/") and request.method == "GET") \
         and not (request.path.startswith("/afiliacion/") and request.path != "/afiliacion/iniciar") \
         and not validar_api_key(request):
         return (json.dumps({"error": "API Key invalida"}), 401, HEADERS)
-
+    
     path = request.path.rstrip("/")
 
     if path == "/bitacora":
@@ -399,8 +426,18 @@ def api(request):
         return handle_recordatorio_sctr_2(request)
     elif path == "/excel_rechazados":
         return handle_excel_rechazados(request)
+    elif path == "/sync_rechazados_excel":
+        return handle_sync_rechazados_excel(request)
     elif path == "/sctr/crear_grupo":
         return handle_sctr_crear_grupo(request)
+    elif path == "/sctr/reporte-wsp" and request.method == "GET":
+        return handle_reporte_wsp_sctr_vencidos(request)
+    elif path == "/chattigo/dashboard":
+        return handle_chattigo_dashboard(request)
+    elif path == "/chattigo/agentes/snapshot" and request.method == "POST":
+        return handle_chattigo_snapshot(request)
+    elif path == "/chattigo/agentes/historico" and request.method == "POST":
+        return handle_chattigo_historico(request)
     elif path == "/afiliacion/iniciar":
         return handle_iniciar_afiliacion(request)
     elif path == "/afiliacion/consulta-ruc":
@@ -435,6 +472,59 @@ def api(request):
         return handle_reporte_excel_afiliacion(request)
     elif path == "/programa-cronico/reenviar-danaconnect":
         return handle_reenviar_danaconnect(request)
+    elif path == "/programa-cronico/reprocesar":
+        return handle_reprocesar_cronico(request)
+    elif path == "/programa-cronico/aprobar-manual":
+        return handle_aprobar_manual_cronico(request)
+    elif path == "/programa-cronico/recordatorio":
+        return handle_recordatorio_cronico(request)
+    elif path == "/programa-cronico/forzar-recordatorio":
+        return handle_forzar_recordatorio_cronico(request)
+    elif path.startswith("/oferta/") and path.endswith("/estado") and request.method == "GET":
+        token = path.split("/oferta/")[1].rsplit("/estado", 1)[0]
+        return handle_estado_oferta_token(request, token)
+    elif path.startswith("/oferta/") and path.endswith("/aceptar") and request.method == "POST":
+        token = path.split("/oferta/")[1].rsplit("/aceptar", 1)[0]
+        return handle_aceptar_oferta_token(request, token)
+    elif path.startswith("/oferta/") and path.endswith("/rechazar") and request.method == "POST":
+        token = path.split("/oferta/")[1].rsplit("/rechazar", 1)[0]
+        return handle_rechazar_oferta_token(request, token)
+    elif path.startswith("/oferta/") and request.method == "GET":
+        token = path.split("/oferta/")[1]
+        return handle_servir_oferta(request, token)
+    elif path.startswith("/proveedores/") and path.endswith("/disponibilidad") and request.method == "POST":
+        proveedor_id = path.split("/proveedores/")[1].rsplit("/disponibilidad", 1)[0]
+        return handle_toggle_disponibilidad(request, proveedor_id)
+    elif path.startswith("/proveedores/") and path.endswith("/estado-actual") and request.method == "GET":
+        proveedor_id = path.split("/proveedores/")[1].rsplit("/estado-actual", 1)[0]
+        return handle_estado_actual_proveedor(request, proveedor_id)
+    elif path.startswith("/ofertas/") and path.endswith("/rechazar") and request.method == "POST":
+        oferta_id = path.split("/ofertas/")[1].rsplit("/rechazar", 1)[0]
+        return handle_rechazar_oferta(request, oferta_id)
+    elif path.startswith("/solicitudes/") and path.endswith("/estado") and request.method == "POST":
+        solicitud_id = path.split("/solicitudes/")[1].rsplit("/estado", 1)[0]
+        return handle_actualizar_estado_solicitud(request, solicitud_id)
+    elif path == "/solicitudes/revisar-timeouts" and request.method == "GET":
+        return handle_revisar_timeouts_ofertas(request)
+    elif path == "/solicitudes/crear" and request.method == "POST":
+        return handle_crear_solicitud(request)
+    elif path.startswith("/solicitudes/") and path.endswith("/buscar-proveedor") and request.method == "GET":
+        solicitud_id = path.split("/solicitudes/")[1].rsplit("/buscar-proveedor", 1)[0]
+        return handle_buscar_proveedor(request, solicitud_id)
+    elif path.startswith("/ofertas/") and path.endswith("/aceptar") and request.method == "POST":
+        oferta_id = path.split("/ofertas/")[1].rsplit("/aceptar", 1)[0]
+        return handle_aceptar_oferta(request, oferta_id)
+    elif path.startswith("/proveedores/") and path.endswith("/ubicacion") and request.method == "POST":
+        proveedor_id = path.split("/proveedores/")[1].rsplit("/ubicacion", 1)[0]
+        return handle_actualizar_ubicacion_proveedor(request, proveedor_id)
+    elif path.startswith("/track/") and path.endswith("/estado") and request.method == "GET":
+        tracking_token = path.split("/track/")[1].rsplit("/estado", 1)[0]
+        return obtener_estado_tracking(tracking_token)
+    elif path.startswith("/track/") and request.method == "GET":
+        tracking_token = path.split("/track/")[1]
+        return handle_servir_tracking(request, tracking_token)
+    elif path == "/proveedor" and request.method == "GET":
+        return handle_servir_proveedor(request)
     elif path == "/sctr/whatsapp/resumen" and request.method == "POST":
         return handle_sctr_resumen_whatsapp(request)
     elif path == "/sctr/whatsapp/excel" and request.method == "POST":
@@ -445,6 +535,8 @@ def api(request):
         return handle_sctr_excel_web(request)
     elif path == "/programa-cronico/reporte" and request.method == "GET":
         return handle_reporte_cronico(request)
+    elif path == "/programa-cronico/estadistica" and request.method == "GET":
+        return handle_estadistica_cronico(request)
     elif path == "/programa-cronico/actualizar-contacto" and request.method == "POST":
         return handle_actualizar_contacto_cronico(request)
     elif path == "/programa-cronico/mantenimiento" and request.method in ("GET", "POST"):
@@ -502,6 +594,12 @@ def api(request):
     elif path.startswith("/c/"):
         code = path.split("/c/")[1]
         return handle_redirect_campania(code, request)
+    elif path.startswith("/ps/confirm/"):
+        code = path.split("/ps/confirm/")[1]
+        return handle_confirmar_click_programa_salud(code, request)
+    elif path.startswith("/ps/"):
+        code = path.split("/ps/")[1]
+        return handle_redirect_programa_salud(code, request)
     elif path.startswith("/static/"):
         filename = path.split("/static/")[1]
         return handle_static_campania(filename)
@@ -511,12 +609,72 @@ def api(request):
     elif request.path.startswith("/afiliacion/") and request.method == "GET":
         token = request.path.rstrip("/").split("/afiliacion/")[1]
         return handle_ver_wizard_afiliacion(request, token)
+    elif path == "/social/mantenimiento" and request.method in ("GET", "POST"):
+        return handle_mantenimiento_social(request)
+    elif path == "/social/reporte" and request.method == "GET":
+        return handle_reporte_social(request)
+    elif path.startswith("/s/confirm/"):
+        code = path.split("/s/confirm/")[1]
+        return handle_confirmar_click_social(code, request)
+    elif path.startswith("/s/"):
+        code = path.split("/s/")[1]
+        return handle_redirect_social(code, request)
+    elif path == '/backoffice/login' and request.method == 'POST':
+        return bo_login(request)
+    elif path == '/backoffice/logout' and request.method == 'POST':
+        return bo_logout(request)
+    elif path == '/backoffice/solicitar-reset' and request.method == 'POST':
+        return bo_solicitar_reset(request)
+    elif path == '/backoffice/confirmar-reset' and request.method == 'POST':
+        return bo_confirmar_reset(request)
+    elif path == '/backoffice/tareas' and request.method == 'POST':
+        return bo_crear_tarea(request)
+    elif path == '/backoffice/tareas' and request.method == 'GET':
+        return bo_listar_tareas(request)
+    elif path.startswith('/backoffice/tareas/') and path.endswith('/comentarios') and request.method == 'POST':
+        tarea_id = int(path.split('/')[-2])
+        return bo_agregar_comentario(request, tarea_id)
+    elif path.startswith('/backoffice/tareas/') and request.method == 'GET':
+        tarea_id = int(path.split('/')[-1])
+        return bo_detalle_tarea(request, tarea_id)
+    elif path.startswith('/backoffice/tareas/') and request.method == 'PUT':
+        tarea_id = int(path.split('/')[-1])
+        return bo_actualizar_tarea(request, tarea_id)
+    elif path == '/backoffice/asesores' and request.method == 'POST':
+        return bo_crear_asesor(request)
+    elif path == '/backoffice/asesores' and request.method == 'GET':
+        return bo_listar_asesores(request)
+    elif path.startswith('/backoffice/asesores/') and path.endswith('/productividad') and request.method == 'GET':
+        asesor_id = int(path.split('/')[-2])
+        return bo_productividad_asesor(request, asesor_id)
+    elif path.startswith('/backoffice/asesores/') and request.method == 'PUT':
+        asesor_id = int(path.split('/')[-1])
+        return bo_actualizar_asesor(request, asesor_id)
+    elif path == '/backoffice/tablero' and request.method == 'GET':
+        with open(os.path.join(BASE_DIR, 'static/backoffice/tablero.html')) as f:
+            return f.read(), 200, {'Content-Type': 'text/html'}
+    elif path == '/backoffice/admin-asesores' and request.method == 'GET':
+        with open(os.path.join(BASE_DIR, 'static/backoffice/admin_asesores.html')) as f:
+            return f.read(), 200, {'Content-Type': 'text/html'}
+
     
     return (json.dumps({"error": f"Ruta no encontrada: {path}"}), 404, HEADERS)
 
 # ─────────────────────────────────────────────
 # UTILIDAD: oculta texto dejando solo primera letra
 # ─────────────────────────────────────────────
+def _celulares_coinciden(celular_a, celular_b):
+    """
+    Compara dos celulares peruanos ignorando diferencias de prefijo de país
+    (+51 / 51) u otros caracteres. Se comparan los últimos 9 dígitos, que
+    son el número de celular real (ej. 997855645 == 51997855645).
+    """
+    a = re.sub(r"[^\d]", "", celular_a or "")
+    b = re.sub(r"[^\d]", "", celular_b or "")
+    if not a or not b:
+        return False
+    return a[-9:] == b[-9:]
+
 def convierte(texto):
     palabras = texto.split(" ")
     resultado = []
@@ -721,7 +879,7 @@ def handle_busca_doi_completo(request):
                     contador      = 2
 
         # Si celular no coincide con contactos, ocultar direcciones
-        if celular_consulta not in nro_contacto1 and celular_consulta not in nro_contacto2:
+        if not _celulares_coinciden(celular_consulta, nro_contacto1) and not _celulares_coinciden(celular_consulta, nro_contacto2):
             if direccion1: direccion1 = convierte(direccion1)
             if distrito1:  distrito1  = convierte(distrito1)
             if direccion2: direccion2 = convierte(direccion2)
@@ -794,14 +952,17 @@ def handle_update_doi(request):
         contador = cur.fetchone()[0]
 
         if contador == 0:
+            lima  = pytz.timezone("America/Lima")
+            fecha_creacion = datetime.now(lima)
+
             cur.execute("""
                 INSERT INTO sofi_usuarios (
                     doi, nombres, apellidos, direccion1, distrito1,
-                    nro_contacto1, nro_contacto2, email, escoge
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'1')
+                    nro_contacto1, nro_contacto2, email, escoge, fecha_creacion
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'1',%s)
             """, (
                 doi, nombres, apellidos, direccion1, distrito1,
-                nro_contacto1, nro_contacto2, email
+                nro_contacto1, nro_contacto2, email, fecha_creacion
             ))
             conn.commit()
             mensaje = "DOI insertado"
@@ -1055,7 +1216,7 @@ def handle_trae_escoge(request):
             distrito  = distrito3
 
         # Si celular no coincide, ocultar dirección y enmascarar contacto
-        if celular_consulta not in nro_contacto1 and celular_consulta not in nro_contacto2:
+        if not _celulares_coinciden(celular_consulta, nro_contacto1) and not _celulares_coinciden(celular_consulta, nro_contacto2):
             if direccion: direccion = convierte(direccion)
             if distrito:  distrito  = convierte(distrito)
 
@@ -1574,35 +1735,6 @@ def envia_sms_lead_sctr(numero, nombre, id_lead):
     conn.close()
 
     sms_aviso(numero, "lead sctr")
-
-
-def handle_envia_sms_leads_sctr(request):
-    try:
-        lima       = pytz.timezone("America/Lima")
-        ahora      = datetime.now(lima)
-        dia_semana = ahora.isoweekday()  # 1=Lunes ... 7=Domingo
-
-        if dia_semana < 1 or dia_semana > 6:
-            return (json.dumps({"mensaje": "Fuera del horario"}), 200, HEADERS)
-
-        conn = get_connection()
-        cur  = conn.cursor()
-        cur.execute("SELECT DISTINCT ON (celular) id, nombre, celular FROM sofi_leads_sctr WHERE enviado = 'N' ORDER BY celular, id")
-        leads = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        if not leads:
-            return (json.dumps({"mensaje": "No hay leads pendientes"}), 200, HEADERS)
-
-        for id_lead, nombre, celular in leads:
-            numero = f"+{celular}"
-            envia_sms_lead_sctr(numero, nombre, id_lead)
-
-        return (json.dumps({"mensaje": f"Enviado: {len(leads)} leads procesados"}), 200, HEADERS)
-
-    except Exception as e:
-        return (json.dumps({"error": str(e)}), 500, HEADERS)
 
 # ─────────────────────────────────────────────
 # TAREA: /envia-sms-leads-medicamentos
@@ -2796,86 +2928,56 @@ def envia_sms_cartas_rechazadas(numero, nombre):
 # TAREA: /recordatorio-sctr
 # ─────────────────────────────────────────────
 def lee_excel_rechazados():
-    import csv
-    import time
-
     lima    = pytz.timezone("America/Lima")
     ahora   = datetime.now(lima)
     hoy_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Si es lunes, tomar anteayer; si no, tomar ayer
-    dias_atras = 2 if ahora.isoweekday() == 1 else 1
-    ayer = (ahora - timedelta(days=dias_atras)).strftime("%d/%m/%Y")
+    # Si es lunes, tomar anteayer; si no, tomar ayer (misma regla que antes)
+    dias_atras      = 2 if ahora.isoweekday() == 1 else 1
+    fecha_objetivo  = (ahora - timedelta(days=dias_atras)).date()
 
-    #url = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=577147525&single=true&output=csv&t={int(time.time())}"
-    url = (
-        "https://docs.google.com/spreadsheets/d/"
-        "1dJdYBQqzjilP7SXLsb6OSgi_wOqn8DrxfiQ6-OtNcM8"
-        "/gviz/tq?tqx=out:csv"
-        "&gid=577147525"
-        f"&t={int(time.time())}"
-        )
-
-    lines = safe_read_csv(url)
-    if not lines:
-        print("No se pudo leer el archivo, posiblemente está en actualización.")
-        return "Error lectura CSV"
-
-    last1000 = lines[max(0, len(lines) - 1000):]
-    reader   = csv.reader(last1000)
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT sol, nombre, celular, fecha_rechazo
+        FROM sofi_rechazados_raw
+        WHERE fecha_rechazo = %s
+    """, (fecha_objetivo,))
+    filas = cur.fetchall()
 
     contador             = 0
     contador_con_celular = 0
     rows_to_insert       = []
 
-    for row in reader:
-        if not row:
-            continue
+    for sol, nombre, celular, fecha_rechazo in filas:
+        rows_to_insert.append((
+            sol,
+            fecha_rechazo.strftime("%Y-%m-%d"),
+            celular,
+            nombre,
+            hoy_str,
+            "N",
+            None,
+            "N"
+        ))
 
-        fecha_linea = row[23].strip() if len(row) > 23 else ""
-        row_2  = row[2].strip()  if len(row) > 2  else ""
-        row_4  = row[4].strip()  if len(row) > 4  else ""
-        row_21 = row[21].strip() if len(row) > 21 else ""
-        row_23 = row[23].strip() if len(row) > 23 else ""
+        if celular and len(celular) == 9 and celular[0] == "9" and celular != "999999999":
+            nombre_corto = nombre[:64] if nombre and len(nombre) > 64 else nombre
+            envia_sms_cartas_rechazadas(celular, nombre_corto)
+            contador_con_celular += 1
 
-        if ayer in fecha_linea:
-            # Convertir fecha DD/MM/YYYY → YYYY-MM-DD
-            try:
-                fecha_rechazo = datetime.strptime(row_23, "%d/%m/%Y").strftime("%Y-%m-%d")
-            except ValueError:
-                fecha_rechazo = row_23
+        contador += 1
 
-            rows_to_insert.append((
-                row_2,          # sol
-                fecha_rechazo,  # fecha_rechazo
-                row_21,         # celular
-                row_4,          # nombre
-                hoy_str,        # fecha
-                "N",            # ingreso_wsp
-                None,           # fecha_ingreso_wsp
-                "N"             # hablar_asesor
-            ))
-
-            # Enviar SMS si tiene celular válido
-            if len(row_21) == 9 and row_21[0] == "9" and row_21 != "999999999":
-                nombre = row_4[:64] if len(row_4) > 64 else row_4
-                envia_sms_cartas_rechazadas(row_21, nombre)
-                contador_con_celular += 1
-
-            contador += 1
-
-    # Insertar registros en base de datos
     if rows_to_insert:
-        conn = get_connection()
-        cur  = conn.cursor()
         cur.executemany("""
             INSERT INTO sofi_cg_rechazados
                 (sol, fecha_rechazo, celular, nombre, fecha, ingreso_wsp, fecha_ingreso_wsp, hablar_asesor)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, rows_to_insert)
         conn.commit()
-        cur.close()
-        conn.close()
+
+    cur.close()
+    conn.close()
 
     return f"Total: {contador} | Tienen celular: {contador_con_celular}"
 
@@ -4683,17 +4785,6 @@ def handle_static_campania(filename):
 def handle_static_assets(filename):
     return send_from_directory("assets", filename)
 
-def con_log_errores(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logging.error(f"Error en {func.__name__}: {e}")
-            logging.error(traceback.format_exc())
-            return (json.dumps({"error": f"Error interno en {func.__name__}: {str(e)}"}), 500, HEADERS)
-    return wrapper
-
 @con_log_errores
 def handle_cargar_excel_web(request):
     pw = request.args.get("pw")
@@ -4785,6 +4876,10 @@ def _limpiar_nombre_sms(nombre):
 def _enviar_sms_campania_uno(numero, nombre, mensaje_tpl, link_corto, code):
     nombre_limpio = _limpiar_nombre_sms(nombre)
     mensaje = mensaje_tpl.replace("{Nombre}", nombre_limpio)
+
+    # ── Validación: SMS no debe exceder 160 caracteres ──
+    if len(mensaje) > 160:
+        return False, f"Mensaje excede 160 caracteres ({len(mensaje)}): {mensaje[:50]}..."
 
     payload = {
         "NUM":  f" {numero}",
@@ -5585,13 +5680,472 @@ def handle_envio_especial_web(request):
     return _layout_campania(pw, "Envío especial", "Carga puntual: Excel + mensaje + imagen propios", contenido, activo="especial")
 
 # ───────────────────────────────────────────────────────────────
+# Enlaces con contador para redes sociales
+# ───────────────────────────────────────────────────────────────
+ADMIN_PW_SOCIAL = os.environ.get("ADMIN_PW_SOCIAL")
+
+
+def _generar_code_social(nombre: str) -> str:
+    raw = f"{nombre}{time.time()}".encode()
+    h = hashlib.md5(raw).digest()
+    return base64.urlsafe_b64encode(h)[:7].decode()
+
+
+def _layout_social(pw, titulo, subtitulo, contenido_html, activo=""):
+    def link(href, texto, key):
+        clase = "activo" if key == activo else ""
+        return f'<a href="{href}?pw={pw}" class="{clase}">{texto}</a>'
+
+    nav_html = f"""
+    <nav class="tabs">
+      {link("/social/mantenimiento", "🔗 Crear / Gestionar", "mantenimiento")}
+      {link("/social/reporte", "📊 Reporte de clics", "reporte")}
+    </nav>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{titulo} - Sanitas</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+  <style>{CAMPANIA_CSS}</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>{titulo}</h1>
+    <div class="subtitulo">{subtitulo}</div>
+  </div>
+  <div class="contenedor">
+    {nav_html}
+    {contenido_html}
+  </div>
+</body>
+</html>"""
+
+
+# ─────────────────────────────────────────────
+# WEB: crear y listar enlaces sociales
+# GET  /social/mantenimiento?pw=...          -> lista + formulario de creación
+# POST /social/mantenimiento?pw=...          -> crea un nuevo enlace
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_mantenimiento_social(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_SOCIAL:
+        return "No autorizado", 401
+
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    mensaje_resultado = ""
+
+    if request.method == "POST":
+        nombre = (request.form.get("nombre") or "").strip()
+        plataforma = (request.form.get("plataforma") or "").strip().upper()
+        whatsapp_destino = (request.form.get("whatsapp_destino") or "").strip()
+        mensaje_prellenado = (request.form.get("mensaje_prellenado") or "").strip()
+        og_title = (request.form.get("og_title") or "Sanitas Perú").strip()
+        og_description = (request.form.get("og_description") or "Contáctanos por WhatsApp").strip()
+        og_image = (request.form.get("og_image") or "").strip()
+
+        if not nombre or not whatsapp_destino:
+            mensaje_resultado = '<p class="msg-error">Nombre y WhatsApp destino son obligatorios.</p>'
+        else:
+            code = _generar_code_social(nombre)
+            conn = get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO enlaces_sociales
+                            (code, nombre, plataforma, whatsapp_destino, mensaje_prellenado,
+                             og_title, og_description, og_image)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (code, nombre, plataforma, whatsapp_destino, mensaje_prellenado,
+                          og_title, og_description, og_image))
+                conn.commit()
+            finally:
+                conn.close()
+
+            link_generado = f"{base_url}/s/{code}"
+            mensaje_resultado = f"""
+            <p class="msg-exito">✅ Enlace creado: <code>{link_generado}</code></p>
+            <p style="margin-top:8px;">
+              <input type="text" value="{link_generado}" readonly style="width:100%;font-size:13px;" onclick="this.select();">
+            </p>
+            """
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT code, nombre, plataforma, whatsapp_destino, activo, raw_hits, creado_at, og_image,
+                       (SELECT COUNT(*) FROM enlaces_sociales_clicks c WHERE c.code = enlaces_sociales.code) AS clics_confirmados
+                FROM enlaces_sociales
+                ORDER BY creado_at DESC
+            """)
+            enlaces = cur.fetchall()
+    finally:
+        conn.close()
+
+    filas_html = ""
+    for code, nombre, plataforma, whatsapp_destino, activo, raw_hits, creado_at, og_image, clics_confirmados in enlaces:
+        link_completo = f"{base_url}/s/{code}"
+        badge_activo = '<span class="badge badge-ok">Activo</span>' if activo else '<span class="badge badge-neutro">Inactivo</span>'
+        miniatura = (
+            f'<img src="{og_image}" style="max-width:50px;max-height:50px;border-radius:6px;object-fit:cover;">'
+            if og_image else '<span class="badge badge-neutro">Sin imagen</span>'
+        )
+        filas_html += f"""<tr>
+            <td>{miniatura}</td>
+            <td>{nombre}<br><span style="font-size:11px;color:var(--sanitas-gray);">{plataforma or ''}</span></td>
+            <td><input type="text" value="{link_completo}" readonly style="width:180px;font-size:12px;" onclick="this.select();"></td>
+            <td>{whatsapp_destino}</td>
+            <td>{raw_hits or 0}</td>
+            <td><b>{clics_confirmados or 0}</b></td>
+            <td>{badge_activo}</td>
+            <td>{creado_at.strftime('%d/%m/%Y') if creado_at else ''}</td>
+        </tr>"""
+
+    if not enlaces:
+        filas_html = '<tr><td colspan="7" style="text-align:center;color:var(--sanitas-gray);padding:20px;">Aún no hay enlaces creados.</td></tr>'
+
+    contenido = f"""
+    <div class="card">
+      <form method="POST" action="/social/mantenimiento?pw={pw}">
+        <label>Nombre identificador (ej. post_fb_agosto2026)</label>
+        <input type="text" name="nombre" required>
+        <label>Plataforma</label>
+        <select name="plataforma">
+          <option value="FACEBOOK">Facebook</option>
+          <option value="INSTAGRAM">Instagram</option>
+          <option value="TIKTOK">TikTok</option>
+          <option value="OTRO">Otro</option>
+        </select>
+        <label>WhatsApp destino (código país + número, sin +)</label>
+        <input type="text" name="whatsapp_destino" placeholder="51955973936" required>
+        <label>Mensaje prellenado (opcional, se abrirá ya escrito en WhatsApp)</label>
+        <textarea name="mensaje_prellenado" rows="2" placeholder="Hola, vengo de Instagram y quiero información sobre..."></textarea>
+        <label>OG Title (título de la vista previa al compartir)</label>
+        <input type="text" name="og_title" value="Sanitas Perú">
+        <label>OG Description</label>
+        <input type="text" name="og_description" value="Contáctanos por WhatsApp">
+        <label>OG Image (URL pública de imagen, opcional)</label>
+        <input type="text" name="og_image" placeholder="https://storage.googleapis.com/.../imagen.jpg">
+        <button type="submit">Crear enlace</button>
+      </form>
+      {mensaje_resultado}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Imagen</th><th>Nombre</th><th>Link</th><th>WhatsApp</th><th>Hits crudos</th><th>Clics confirmados</th><th>Estado</th><th>Creado</th></tr>
+        {filas_html}
+      </table>
+    </div>
+    """
+
+    return _layout_social(pw, "Enlaces sociales", "Links con seguimiento de clics para redes sociales", contenido, activo="mantenimiento")
+
+
+# ─────────────────────────────────────────────
+# WEB: reporte de clics
+# ─────────────────────────────────────────────
+@con_log_errores
+@con_log_errores
+def handle_reporte_social(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_SOCIAL:
+        return "No autorizado", 401
+
+    code_filtro = request.args.get("code", "")
+    fecha_inicio = request.args.get("fecha_inicio", "")
+    fecha_fin = request.args.get("fecha_fin", "")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT code, nombre FROM enlaces_sociales ORDER BY nombre")
+            enlaces_todos = cur.fetchall()
+            nombre_por_code = {code: nombre for code, nombre in enlaces_todos}
+
+            where = ["1=1"]
+            params = []
+            if code_filtro:
+                where.append("c.code = %s")
+                params.append(code_filtro)
+            if fecha_inicio:
+                where.append("c.fecha >= %s")
+                params.append(fecha_inicio)
+            if fecha_fin:
+                where.append("c.fecha < (%s::date + INTERVAL '1 day')")
+                params.append(fecha_fin)
+            where_sql = " AND ".join(where)
+
+            # ── Detalle día x enlace (para el pivot y el gráfico) ──
+            cur.execute(f"""
+                SELECT c.fecha::date AS fecha, c.code, COUNT(*) AS clics
+                FROM enlaces_sociales_clicks c
+                WHERE {where_sql}
+                GROUP BY c.fecha::date, c.code
+                ORDER BY fecha DESC
+            """, params)
+            filas_pivot = cur.fetchall()
+
+            cur.execute(f"SELECT COUNT(*) FROM enlaces_sociales_clicks c WHERE {where_sql}", params)
+            total_clics = cur.fetchone()[0]
+
+            # ── Detalle de clics individuales, solo si hay un enlace filtrado ──
+            detalle_clicks = []
+            if code_filtro:
+                cur.execute("""
+                    SELECT fecha, ip_address, user_agent
+                    FROM enlaces_sociales_clicks
+                    WHERE code = %s
+                    ORDER BY fecha DESC
+                    LIMIT 300
+                """, (code_filtro,))
+                detalle_clicks = cur.fetchall()
+    finally:
+        conn.close()
+
+    # ── Armar el pivot en memoria: {fecha: {code: clics}} ──
+    fechas_ordenadas = sorted({f for f, c, n in filas_pivot}, reverse=True)
+    codes_presentes = sorted({c for f, c, n in filas_pivot}, key=lambda cod: nombre_por_code.get(cod, cod))
+
+    pivot = {}
+    for fecha, code, clics in filas_pivot:
+        pivot.setdefault(fecha, {})[code] = clics
+
+    totales_por_code = {
+        code: sum(pivot.get(f, {}).get(code, 0) for f in fechas_ordenadas)
+        for code in codes_presentes
+    }
+
+    # ── Tabla pivot ──
+    columnas_html = "".join(f"<th>{nombre_por_code.get(code, code)}</th>" for code in codes_presentes)
+
+    filas_pivot_html = ""
+    for fecha in fechas_ordenadas:
+        celdas = "".join(
+            f"<td>{pivot.get(fecha, {}).get(code, 0) or '—'}</td>" for code in codes_presentes
+        )
+        total_dia = sum(pivot.get(fecha, {}).values())
+        filas_pivot_html += f"<tr><td>{fecha.strftime('%d/%m/%Y')}</td>{celdas}<td><b>{total_dia}</b></td></tr>"
+
+    if not fechas_ordenadas:
+        colspan = len(codes_presentes) + 2
+        filas_pivot_html = f'<tr><td colspan="{colspan}" style="text-align:center;color:var(--sanitas-gray);padding:20px;">Sin clics en el rango seleccionado.</td></tr>'
+
+    fila_totales_html = "".join(f"<td><b>{totales_por_code.get(code, 0)}</b></td>" for code in codes_presentes)
+
+    # ── Gráfico de tendencia (Chart.js), una línea por enlace ──
+    grafico_html = ""
+    if fechas_ordenadas:
+        labels_chart = [f.strftime('%d/%m') for f in reversed(fechas_ordenadas)]
+        colores = ["#00A9B7", "#003654", "#2E9E5B", "#E8A33D", "#D64545", "#6B7A82", "#8E44AD", "#16A085"]
+        datasets_js = []
+        for i, code in enumerate(codes_presentes):
+            data_serie = [pivot.get(f, {}).get(code, 0) for f in reversed(fechas_ordenadas)]
+            datasets_js.append({
+                "label": nombre_por_code.get(code, code),
+                "data": data_serie,
+                "borderColor": colores[i % len(colores)],
+                "backgroundColor": colores[i % len(colores)],
+                "tension": 0.3,
+            })
+
+        grafico_html = f"""
+        <div class="card">
+          <canvas id="chartClicksSocial" height="90"></canvas>
+        </div>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+        <script>
+          new Chart(document.getElementById('chartClicksSocial').getContext('2d'), {{
+            type: 'line',
+            data: {{
+              labels: {json.dumps(labels_chart)},
+              datasets: {json.dumps(datasets_js)}
+            }},
+            options: {{ responsive: true, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+          }});
+        </script>
+        """
+
+    opciones_enlace = "".join(
+        f'<option value="{code}" {"selected" if code == code_filtro else ""}>{nombre}</option>'
+        for code, nombre in enlaces_todos
+    )
+
+    # ── Detalle de clics individuales (solo cuando hay un enlace seleccionado) ──
+    detalle_html = ""
+    if code_filtro:
+        filas_detalle_html = ""
+        for fecha, ip, ua in detalle_clicks:
+            ua_corto = (ua or "")[:70]
+            filas_detalle_html += f"""<tr>
+                <td>{fecha.strftime('%d/%m/%Y %H:%M:%S')}</td>
+                <td>{ip or ''}</td>
+                <td style="font-size:11px;color:var(--sanitas-gray);">{ua_corto}</td>
+            </tr>"""
+        if not detalle_clicks:
+            filas_detalle_html = '<tr><td colspan="3" style="text-align:center;color:var(--sanitas-gray);padding:14px;">Sin registros.</td></tr>'
+
+        detalle_html = f"""
+        <div class="card">
+          <h3 style="margin:0 0 4px;">Detalle de clics individuales — {nombre_por_code.get(code_filtro, code_filtro)}</h3>
+          <p style="color:var(--sanitas-gray);font-size:12px;margin:0;">Últimos 300 registros</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tr><th>Fecha y hora</th><th>IP</th><th>Navegador</th></tr>
+            {filas_detalle_html}
+          </table>
+        </div>
+        """
+
+    contenido = f"""
+    <div class="card">
+      <form method="GET" action="/social/reporte" class="filtros">
+        <input type="hidden" name="pw" value="{pw}">
+        <div><label>Enlace</label>
+          <select name="code"><option value="">Todos</option>{opciones_enlace}</select>
+        </div>
+        <div><label>Desde</label><input type="date" name="fecha_inicio" value="{fecha_inicio}"></div>
+        <div><label>Hasta</label><input type="date" name="fecha_fin" value="{fecha_fin}"></div>
+        <button type="submit">Filtrar</button>
+      </form>
+    </div>
+    <div class="card">
+      <div style="font-size:12px;color:var(--sanitas-gray);">Total de clics confirmados</div>
+      <div style="font-size:28px;font-weight:700;color:var(--sanitas-success);">{total_clics or 0}</div>
+    </div>
+    {grafico_html}
+    <div class="table-wrap">
+      <table>
+        <tr><th>Fecha</th>{columnas_html}<th>Total día</th></tr>
+        {filas_pivot_html}
+        <tr style="background:rgba(0,169,183,0.08);"><td><b>Total</b></td>{fila_totales_html}<td><b>{total_clics or 0}</b></td></tr>
+      </table>
+    </div>
+    {detalle_html}
+    """
+
+    return _layout_social(pw, "Reporte de clics", "Detalle por día y por enlace", contenido, activo="reporte")
+
+
+
+# ─────────────────────────────────────────────
+# PÚBLICO: redirección + registro del clic
+# GET /s/<code>
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_redirect_social(code, request):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT whatsapp_destino, mensaje_prellenado, og_title, og_description, og_image, activo
+                FROM enlaces_sociales WHERE code = %s
+            """, (code,))
+            row = cur.fetchone()
+            if not row:
+                return "Enlace no encontrado", 404
+
+            whatsapp_destino, mensaje_prellenado, og_title, og_description, og_image, activo = row
+
+            if not activo:
+                return "Este enlace ya no está disponible", 410
+
+            cur.execute("""
+                UPDATE enlaces_sociales SET raw_hits = raw_hits + 1 WHERE code = %s
+            """, (code,))
+            conn.commit()
+    finally:
+        conn.close()
+
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    url_canonica = f"{base_url}/s/{code}"
+
+    texto_wa = quote(mensaje_prellenado) if mensaje_prellenado else ""
+    url_destino = f"https://wa.me/{whatsapp_destino}"
+    if texto_wa:
+        url_destino += f"?text={texto_wa}"
+
+    # ── Meta tags de imagen: cache-busting + dimensiones + twitter:image ──
+    # Sin twitter:image algunos clientes arman la tarjeta sin imagen aunque
+    # og:image esté correcto. El parámetro ?v= evita que, al cambiar la
+    # imagen de un link ya compartido, siga sirviendo la versión vieja
+    # cacheada por WhatsApp/Facebook la próxima vez que se re-escanee.
+    if og_image:
+        separador = "&" if "?" in og_image else "?"
+        img_url_meta = f"{og_image}{separador}v={int(time.time())}"
+        imagen_meta = f"""<meta property="og:image" content="{img_url_meta}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:image" content="{img_url_meta}">"""
+    else:
+        imagen_meta = ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{url_canonica}">
+  <meta property="og:site_name" content="Sanitas Perú">
+  <meta property="og:title" content="{og_title or 'Sanitas Perú'}">
+  <meta property="og:description" content="{og_description or 'Contáctanos por WhatsApp'}">
+  {imagen_meta}
+  <meta name="twitter:card" content="summary_large_image">
+  <title>{og_title or 'Sanitas Perú'}</title>
+</head>
+<body>
+  <script>
+    if (navigator.sendBeacon) {{
+      navigator.sendBeacon("/s/confirm/{code}");
+    }} else {{
+      fetch("/s/confirm/{code}", {{ method: "POST", keepalive: true }});
+    }}
+    window.location.href = "{url_destino}";
+  </script>
+  <p>Redirigiendo a WhatsApp... <a href="{url_destino}">Haz clic aquí si no eres redirigido.</a></p>
+</body>
+</html>"""
+    return html, 200
+
+
+# ─────────────────────────────────────────────
+# PÚBLICO: confirmación real del clic (via sendBeacon)
+# POST /s/confirm/<code>
+# Solo se llama si el JS del navegador se ejecutó de verdad,
+# lo que filtra la mayoría de crawlers/bots de preview de Facebook/Instagram.
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_confirmar_click_social(code, request):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM enlaces_sociales WHERE code = %s", (code,))
+            if not cur.fetchone():
+                return "", 204
+
+            cur.execute("""
+                INSERT INTO enlaces_sociales_clicks (code, ip_address, user_agent)
+                VALUES (%s, %s, %s)
+            """, (code, request.remote_addr, request.headers.get("User-Agent", "")))
+            conn.commit()
+    finally:
+        conn.close()
+
+    return "", 204
+
+# ───────────────────────────────────────────────────────────────
 # Prioridad de programas (más complejo = número más alto)
 # ───────────────────────────────────────────────────────────────
 import xml.etree.ElementTree as ET
 
 DANACONNECT_USER = os.environ.get("DANACONNECT_USER", "canalesAPI@sanitasperu")
 DANACONNECT_PASSWORD = os.environ.get("DANACONNECT_PASSWORD")
-DANACONNECT_CONVERSATION_ID = "597680"
+DANACONNECT_CONVERSATION_ID = "601417"
 DANACONNECT_CONVERSATION_ID_CRONICO = "597709"
 
 DANACONNECT_FILE2_POR_PROGRAMA = {
@@ -5759,11 +6313,28 @@ PRIORIDAD_PROGRAMAS = {
     "vive_sano_peas": 1,
 }
 
+STOPWORDS_NOMBRES = {"DE", "DEL", "LA", "LAS", "LOS", "Y"}
+
 def _normalizar_nombre(nombre):
-    nombre = (nombre or "").upper()
-    nombre = re.sub(r"[.,;:]", " ", nombre)  # quita comas, puntos, etc.
-    nombre = re.sub(r"\s+", " ", nombre).strip()
-    return nombre
+     nombre = (nombre or "").upper()
+     nombre = re.sub(r"[.,;:]", " ", nombre)  # quita comas, puntos, etc.
+     nombre = re.sub(r"\s+", " ", nombre).strip()
+     return nombre
+
+def _dni_similar(dni_a, dni_b, max_diferencias=1):
+    """
+    Compara dos números de documento tolerando hasta max_diferencias dígitos
+    distintos, para absorber errores comunes de OCR en un solo carácter
+    (ej. '4' leído como '9', '0' leído como '8'). Solo aplica si ambos
+    tienen la misma longitud; si difieren en longitud, se considera que
+    no coinciden (evita falsos positivos por documentos truncados).
+    """
+    a = re.sub(r"[^\d]", "", dni_a or "")
+    b = re.sub(r"[^\d]", "", dni_b or "")
+    if not a or not b or len(a) != len(b):
+        return False
+    diferencias = sum(1 for c1, c2 in zip(a, b) if c1 != c2)
+    return diferencias <= max_diferencias
 
 def _nombres_coinciden(nombre1, nombre2, umbral=0.85):
     import jellyfish
@@ -5778,8 +6349,8 @@ def _nombres_coinciden(nombre1, nombre2, umbral=0.85):
         return True
 
     # Comparación 2: por conjunto de palabras (tolera orden distinto, ej. apellidos/nombres invertidos)
-    palabras1 = set(n1.split())
-    palabras2 = set(n2.split())
+    palabras1 = set(n1.split()) - STOPWORDS_NOMBRES
+    palabras2 = set(n2.split()) - STOPWORDS_NOMBRES
     if not palabras1 or not palabras2:
         return False
 
@@ -5836,52 +6407,97 @@ Texto extraído del documento:
         datos = {"nombre_paciente": None, "fecha_emision": None, "diagnosticos": []}
     return datos
 
-_CONFUSIONES_OCR_INICIAL = {"1": "I", "0": "O", "5": "S", "8": "B", "6": "G", "2": "Z"}
+_CONFUSIONES_OCR_GENERAL = {
+    "1": "I", "0": "O", "5": "S", "8": "B", "6": "G", "2": "Z",
+    "I": "1", "O": "0", "S": "5", "B": "8", "G": "6", "Z": "2",
+}
 
-def _generar_candidatos_cie10(cie10_limpio):
-    candidatos = [cie10_limpio]
-    if cie10_limpio and cie10_limpio[0] in _CONFUSIONES_OCR_INICIAL:
-        corregido = _CONFUSIONES_OCR_INICIAL[cie10_limpio[0]] + cie10_limpio[1:]
-        candidatos.append(corregido)
-    return candidatos
+def _generar_candidatos_cie10(cie10_limpio, max_candidatos=8):
+    """
+    Genera variantes del código probando corregir, de a una posición a la
+    vez, caracteres que suelen confundirse por OCR (letra/dígito). La
+    primera posición SIEMPRE debe ser letra (regla CIE-10), así que ahí se
+    fuerza dígito->letra; en el resto de posiciones se prueban ambos
+    sentidos porque el error puede ir en cualquier dirección.
+    """
+    if not cie10_limpio:
+        return []
+
+    candidatos = {cie10_limpio}
+
+    # Posición 0: siempre debe terminar siendo letra
+    if cie10_limpio[0] in _CONFUSIONES_OCR_GENERAL:
+        candidatos.add(_CONFUSIONES_OCR_GENERAL[cie10_limpio[0]] + cie10_limpio[1:])
+
+    # Resto de posiciones: prueba sustitución individual (una por variante)
+    for i in range(1, len(cie10_limpio)):
+        char = cie10_limpio[i]
+        if char in _CONFUSIONES_OCR_GENERAL:
+            variante = cie10_limpio[:i] + _CONFUSIONES_OCR_GENERAL[char] + cie10_limpio[i + 1:]
+            candidatos.add(variante)
+            if len(candidatos) >= max_candidatos:
+                break
+
+    return list(candidatos)
 
 def determinar_programa_por_diagnosticos(diagnosticos_receta, cur):
     matches = []  # lista de (programa, cie10, descripcion) por cada diagnóstico encontrado
+    
+    # Catálogo completo cargado una sola vez, usado tanto para el match por
+    # código como para el fallback por similitud de texto.
+    cur.execute("SELECT programa, cie_10, descripcion FROM sofi_programa_diagnosticos")
+    catalogo = cur.fetchall()
+
+    UMBRAL_SIMILITUD_DESCRIPCION = 75  # calibrar según falsos positivos/negativos observados
 
     for diag in diagnosticos_receta:
         cie10 = _limpiar_cie10(diag.get("cie10"))
-        if not cie10:
-            continue
+        descripcion_diag = (diag.get("descripcion") or "").strip()
 
-        row = None
-        cie10_encontrado = None
-        for candidato in _generar_candidatos_cie10(cie10):
-            cur.execute("SELECT programa, descripcion FROM sofi_programa_diagnosticos WHERE UPPER(TRIM(cie_10)) = %s", (candidato,))
-            row = cur.fetchone()
-            if row:
-                cie10_encontrado = candidato
-                break
+        match_encontrado = None
+        origen_match = None
 
-            cur.execute("SELECT programa, descripcion FROM sofi_programa_diagnosticos WHERE UPPER(TRIM(cie_10)) LIKE %s", (candidato + "%",))
-            row = cur.fetchone()
-            if row:
-                cie10_encontrado = candidato
-                break
+        # 1. Intento por código CIE-10 (exacto o por prefijo, con variantes OCR)
+        if cie10:
+            for candidato in _generar_candidatos_cie10(cie10):
+                for programa_bd, cie_bd, desc_bd in catalogo:
+                    cie_bd_norm = (cie_bd or "").strip().upper()
+                    if cie_bd_norm == candidato or cie_bd_norm.startswith(candidato):
+                        match_encontrado = (programa_bd, cie_bd, desc_bd)
+                        origen_match = f"cie10:{candidato}"
+                        break
+                if match_encontrado:
+                    break
 
-        if row:
-            programa_encontrado, descripcion_bd = row
+        # 2. Fallback: si no hubo match por código (o no vino código),
+        # compara la descripción del diagnóstico contra el catálogo con la
+        # misma función de similitud que ya usa /busca_actividad.
+        if not match_encontrado and descripcion_diag:
+            mejor_score = 0
+            mejor_row = None
+            for programa_bd, cie_bd, desc_bd in catalogo:
+                score = similitud_avanzada(descripcion_diag, desc_bd or "")
+                if score > mejor_score:
+                    mejor_score, mejor_row = score, (programa_bd, cie_bd, desc_bd)
+            if mejor_row and mejor_score >= UMBRAL_SIMILITUD_DESCRIPCION:
+                match_encontrado = mejor_row
+                origen_match = f"descripcion:{mejor_score}"
+
+        if match_encontrado:
+            programa_encontrado, cie10_encontrado, descripcion_bd = match_encontrado
             matches.append((programa_encontrado, cie10_encontrado, descripcion_bd))
+            logging.info(f"[programa-cronico] Match diagnóstico '{descripcion_diag}' -> {programa_encontrado} (origen: {origen_match})")
 
     if not matches:
         return None, None, None
 
     # ── Regla especial: 2 o más diagnósticos de Vive Sano → se sube a Krystal ──
-    conteo_vive_sano = sum(1 for m in matches if m[0] == "vive_sano_completo")
-    if conteo_vive_sano >= 2:
-        matches = [
-            ("krystal", cie10, desc) if programa == "vive_sano_completo" else (programa, cie10, desc)
-            for (programa, cie10, desc) in matches
-        ]
+    #conteo_vive_sano = sum(1 for m in matches if m[0] == "vive_sano_completo")
+    #if conteo_vive_sano >= 2:
+    #    matches = [
+    #        ("krystal", cie10, desc) if programa == "vive_sano_completo" else (programa, cie10, desc)
+    #        for (programa, cie10, desc) in matches
+    #    ]
 
     # ── Elegir el de mayor prioridad entre todos los matches (ya con la regla aplicada) ──
     mejor_programa, mejor_cie10, mejor_descripcion = max(
@@ -6080,6 +6696,8 @@ Texto extraído del documento:
 # API: ENDPOINT PRINCIPAL DE PROGRAMAS
 # ──────────────────────────────────────────
 BUCKET_NAME = "sanitas-programa-cronico"
+ESTADOS_BLOQUEADOS_REINTENTO = ("firmado",)
+
 @con_log_errores
 def handle_recibir_dni_cronico(request):
     data = request.get_json(force=True, silent=True) or {}
@@ -6104,12 +6722,23 @@ def handle_recibir_dni_cronico(request):
     cur = conn.cursor()
 
     # ── Buscar o crear inscripción ──
-    cur.execute("SELECT id FROM sofi_programa_cronico_inscripciones WHERE celular = %s", (celular,))
+    cur.execute(
+        "SELECT id, estado, token FROM sofi_programa_cronico_inscripciones WHERE celular = %s AND n_documento = %s",
+        (celular, n_documento)
+    )
     row = cur.fetchone()
     if row:
-        inscripcion_id = row[0]
-        cur.execute("SELECT token FROM sofi_programa_cronico_inscripciones WHERE id = %s", (inscripcion_id,))
-        token = cur.fetchone()[0]
+        inscripcion_id, estado_actual, token = row
+
+        if estado_actual in ESTADOS_BLOQUEADOS_REINTENTO:
+            cur.close(); conn.close()
+            return (json.dumps({
+                "ok": False,
+                "token": token,
+                "estado": estado_actual,
+                "error": "Esta inscripción ya fue firmada y no puede modificarse. Contacta al equipo de Programa de Salud si necesitas hacer un cambio.",
+            }), 409, HEADERS)
+
         cur.execute("""
             UPDATE sofi_programa_cronico_inscripciones
             SET n_documento = %s, correo = %s, url_receta = %s, actualizado_at = NOW()
@@ -6137,7 +6766,7 @@ def handle_recibir_dni_cronico(request):
         blob.upload_from_string(archivo_bytes, content_type=content_type)
         cur.execute("UPDATE sofi_programa_cronico_inscripciones SET dni_foto_anverso_url = %s, actualizado_at = NOW() WHERE id = %s",
                     (blob.public_url, inscripcion_id))
-        datos_dni = extraer_datos_dni(archivo_bytes, content_type)  # PDF único ya trae ambos lados
+        datos_dni = extraer_datos_dni(archivo_bytes, content_type)
     else:
         resp_a = requests.get(url_anverso, timeout=20); resp_a.raise_for_status()
         bytes_a = resp_a.content
@@ -6151,9 +6780,8 @@ def handle_recibir_dni_cronico(request):
             UPDATE sofi_programa_cronico_inscripciones
             SET dni_foto_anverso_url = %s, dni_foto_reverso_url = %s, actualizado_at = NOW() WHERE id = %s
         """, (blob_a.public_url, blob_r.public_url, inscripcion_id))
-        datos_dni = extraer_datos_dni(bytes_a, "image/jpeg", bytes_r, "image/jpeg")  # ahora sí procesa ambos lados
+        datos_dni = extraer_datos_dni(bytes_a, "image/jpeg", bytes_r, "image/jpeg")
 
-    # ── Ahora que ya tenemos datos_dni, guardamos nombres/domicilio/distrito ──
     cur.execute("""
         UPDATE sofi_programa_cronico_inscripciones
         SET dni_validado = TRUE, nombres = %s, apellidos = %s, fecha_nacimiento = %s,
@@ -6187,20 +6815,25 @@ def handle_recibir_dni_cronico(request):
     nombre_receta = datos_receta.get("nombre_paciente") or ""
     dni_en_receta = datos_receta.get("n_documento_paciente")
 
-    if dni_en_receta:
-        paciente_valido = dni_en_receta.strip() == n_documento.strip()
-    else:
-        paciente_valido = _nombres_coinciden(nombre_dni_completo, nombre_receta)
+    coincide_por_dni = bool(dni_en_receta) and _dni_similar(dni_en_receta.strip(), n_documento.strip())
+    coincide_por_nombre = _nombres_coinciden(nombre_dni_completo, nombre_receta)
+    paciente_valido = coincide_por_dni or coincide_por_nombre
 
-    if not paciente_valido:
-        motivo = "El paciente de la receta no coincide con el DNI / CE"
-        cur.execute("""
-            UPDATE sofi_programa_cronico_inscripciones
-            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, actualizado_at = NOW()
-            WHERE id = %s
-        """, (motivo, nombre_receta, inscripcion_id))
-        conn.commit(); cur.close(); conn.close()
-        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+    #if not paciente_valido:
+    #    motivo = "El paciente de la receta no coincide con el DNI / CE"
+    #    cur.execute("""
+    #        UPDATE sofi_programa_cronico_inscripciones
+    #        SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s,
+    #            datos_ocr_raw = %s, actualizado_at = NOW()
+    #        WHERE id = %s
+    #    """, (motivo, nombre_receta, json.dumps({
+    #            "datos_dni": datos_dni,
+    #            "datos_receta": datos_receta,
+    #            "coincide_por_dni": coincide_por_dni,
+    #            "coincide_por_nombre": coincide_por_nombre,
+    #        }, ensure_ascii=False), inscripcion_id))
+    #    conn.commit(); cur.close(); conn.close()
+    #    return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
 
     # ── Regla 2: receta no mayor a 3 meses ──
     fecha_receta_str = datos_receta.get("fecha_emision")
@@ -6231,9 +6864,13 @@ def handle_recibir_dni_cronico(request):
         motivo = "Ninguno de los diagnósticos de la receta corresponde a un programa disponible"
         cur.execute("""
             UPDATE sofi_programa_cronico_inscripciones
-            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s,
+                datos_ocr_raw = %s, actualizado_at = NOW()
             WHERE id = %s
-        """, (motivo, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        """, (motivo, nombre_receta, fecha_receta_parsed, json.dumps({
+                "datos_dni": datos_dni,
+                "datos_receta": datos_receta,
+            }, ensure_ascii=False), inscripcion_id))
         conn.commit(); cur.close(); conn.close()
         return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
 
@@ -6273,7 +6910,7 @@ def handle_recibir_dni_cronico(request):
     cur.execute("""
         UPDATE sofi_programa_cronico_inscripciones
         SET estado = 'dni_recibido', programa = %s, cie10_detectado = %s, diagnostico_detectado = %s,
-            nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            nombre_paciente_receta = %s, fecha_receta = %s, fecha_dni_recibido = NOW(), actualizado_at = NOW()
         WHERE id = %s
     """, (programa_detectado, cie10_match, descripcion_match, nombre_receta, fecha_receta_parsed, inscripcion_id))
     conn.commit()
@@ -6568,12 +7205,270 @@ def handle_ver_formulario_cronico(request, token):
     )
     return (html_renderizado, 200, {"Content-Type": "text/html; charset=utf-8"})
 
+
+PROGRAMAS_VALIDOS_APROBACION_MANUAL = {"vive_sano_completo", "krystal"}
+
+# ─────────────────────────────────────────────
+# API: /programa-cronico/aprobar-manual
+# Fuerza el paso a 'dni_recibido' sin re-evaluar OCR/reglas,
+# para casos donde el rechazo automático fue un error.
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_aprobar_manual_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("pw") != ADMIN_PW_CRONICO:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
+    token = data.get("token")
+    programa = (data.get("programa") or "").strip()
+    diagnostico = (data.get("diagnostico") or "").strip() or "Aprobado manualmente por equipo de Programa de Salud"
+
+    if not token:
+        return (json.dumps({"error": "token es requerido"}), 400, HEADERS)
+    if programa not in PROGRAMAS_VALIDOS_APROBACION_MANUAL:
+        return (json.dumps({
+            "error": f"programa debe ser uno de: {', '.join(PROGRAMAS_VALIDOS_APROBACION_MANUAL)}"
+        }), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT estado, datos_ocr_raw, nombres, celular, correo
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Token no encontrado"}), 404, HEADERS)
+
+    estado, datos_ocr_raw, nombres, celular, correo = row
+
+    if estado not in ("rechazado", "derivado_manual"):
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": f"Solo se pueden aprobar manualmente inscripciones rechazadas o derivadas (estado actual: {estado})"
+        }), 409, HEADERS)
+
+    # ── Auditoría: dejar registro de que fue una aprobación manual, sin pisar el OCR original ──
+    try:
+        auditoria = json.loads(datos_ocr_raw) if isinstance(datos_ocr_raw, str) else (datos_ocr_raw or {})
+    except (TypeError, json.JSONDecodeError):
+        auditoria = {}
+    if not isinstance(auditoria, dict):
+        auditoria = {}
+
+    auditoria["aprobacion_manual"] = {
+        "programa_asignado": programa,
+        "diagnostico_asignado": diagnostico,
+        "fecha": datetime.now(LIMA_TZ).isoformat(),
+    }
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET estado = 'dni_recibido', programa = %s, diagnostico_detectado = %s,
+            motivo_rechazo = NULL, datos_ocr_raw = %s,
+            fecha_dni_recibido = NOW(), intentos_recordatorio = 0,
+            fecha_ultimo_recordatorio = NULL, actualizado_at = NOW()
+        WHERE token = %s
+    """, (programa, diagnostico, json.dumps(auditoria, ensure_ascii=False), token))
+    conn.commit()
+    cur.close(); conn.close()
+
+    # ── Avisar al paciente que ya puede firmar (best-effort, no bloquea la respuesta) ──
+    try:
+        _enviar_recordatorio_cronico(token, celular, nombres, correo)
+    except Exception as e:
+        logging.warning(f"[aprobar-manual-cronico] No se pudo notificar al paciente: {e}")
+
+    return (json.dumps({
+        "ok": True, "token": token, "estado": "dni_recibido", "programa": programa,
+        "link_firma": f"https://sntspe.com/programa-cronico/{token}"
+    }), 200, HEADERS)
+
+# ─────────────────────────────────────────────
+# API: /programa-cronico/reprocesar
+# Vuelve a correr OCR + reglas de validación sobre los archivos
+# ya almacenados, sin que el paciente reenvíe nada por WhatsApp.
+# ─────────────────────────────────────────────
+@con_log_errores
+def handle_reprocesar_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("pw") != ADMIN_PW_CRONICO:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
+    token = data.get("token")
+    if not token:
+        return (json.dumps({"error": "token es requerido"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, estado, celular, n_documento, correo,
+               dni_foto_anverso_url, dni_foto_reverso_url, url_receta_bucket
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Token no encontrado"}), 404, HEADERS)
+
+    (inscripcion_id, estado, celular, n_documento, correo,
+     dni_anverso_url, dni_reverso_url, url_receta_bucket) = row
+
+    if estado not in ("rechazado", "derivado_manual"):
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": f"Solo se pueden reprocesar inscripciones rechazadas o derivadas (estado actual: {estado})"
+        }), 409, HEADERS)
+
+    if not dni_anverso_url or not url_receta_bucket:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Faltan los archivos originales (DNI o receta) para reprocesar"}), 409, HEADERS)
+
+    # ── Redescargar los archivos originales desde el bucket ──
+    try:
+        bytes_anverso = descargar_blob_desde_url(dni_anverso_url)
+        mime_anverso = _content_type_por_url(dni_anverso_url)
+        bytes_reverso = descargar_blob_desde_url(dni_reverso_url) if dni_reverso_url else None
+        mime_reverso = _content_type_por_url(dni_reverso_url) if dni_reverso_url else None
+        bytes_receta = descargar_blob_desde_url(url_receta_bucket)
+        mime_receta = _content_type_por_url(url_receta_bucket)
+    except Exception as e:
+        cur.close(); conn.close()
+        return (json.dumps({"error": f"No se pudieron descargar los archivos originales: {str(e)}"}), 500, HEADERS)
+
+    # ── Volver a correr OCR (puede corregir un error de lectura anterior) ──
+    datos_dni = extraer_datos_dni(bytes_anverso, mime_anverso, bytes_reverso, mime_reverso)
+    datos_receta = extraer_datos_receta(bytes_receta, mime_type=mime_receta)
+
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET nombres = %s, apellidos = %s, fecha_nacimiento = %s,
+            domicilio = %s, distrito = %s, provincia = %s, departamento = %s,
+            tipo_documento = %s, actualizado_at = NOW()
+        WHERE id = %s
+    """, (datos_dni.get("nombres"), datos_dni.get("apellidos"), datos_dni.get("fecha_nacimiento"),
+          datos_dni.get("domicilio"), datos_dni.get("distrito"), datos_dni.get("provincia"),
+          datos_dni.get("departamento"), datos_dni.get("tipo_documento"), inscripcion_id))
+    conn.commit()
+
+    # ── Regla 1: paciente de la receta coincide con el DNI ──
+    nombre_dni_completo = f"{datos_dni.get('nombres', '')} {datos_dni.get('apellidos', '')}".strip()
+    nombre_receta = datos_receta.get("nombre_paciente") or ""
+    dni_en_receta = datos_receta.get("n_documento_paciente")
+
+    coincide_por_dni = bool(dni_en_receta) and _dni_similar(dni_en_receta.strip(), (n_documento or "").strip())
+    coincide_por_nombre = _nombres_coinciden(nombre_dni_completo, nombre_receta)
+    paciente_valido = coincide_por_dni or coincide_por_nombre
+
+    if not paciente_valido:
+        motivo = "El paciente de la receta no coincide con el DNI / CE"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s,
+                datos_ocr_raw = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, json.dumps({
+                "datos_dni": datos_dni, "datos_receta": datos_receta,
+                "coincide_por_dni": coincide_por_dni, "coincide_por_nombre": coincide_por_nombre,
+                "reprocesado": True,
+            }, ensure_ascii=False), inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 2: receta no mayor a 3 meses ──
+    fecha_receta_str = datos_receta.get("fecha_emision")
+    fecha_receta_parsed = None
+    receta_vigente = False
+    if fecha_receta_str:
+        try:
+            fecha_receta_parsed = datetime.strptime(fecha_receta_str, "%Y-%m-%d").date()
+            receta_vigente = fecha_receta_parsed >= (datetime.now() - timedelta(days=92)).date()
+        except ValueError:
+            receta_vigente = False
+
+    if not receta_vigente:
+        motivo = "La receta tiene una antigüedad mayor a tres meses o no se pudo leer la fecha"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 3: clasificar programa según diagnósticos ──
+    diagnosticos = datos_receta.get("diagnosticos", [])
+    programa_detectado, cie10_match, descripcion_match = determinar_programa_por_diagnosticos(diagnosticos, cur)
+
+    if not programa_detectado:
+        motivo = "Ninguno de los diagnósticos de la receta corresponde a un programa disponible"
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'rechazado', motivo_rechazo = %s, nombre_paciente_receta = %s, fecha_receta = %s,
+                datos_ocr_raw = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (motivo, nombre_receta, fecha_receta_parsed, json.dumps({
+                "datos_dni": datos_dni, "datos_receta": datos_receta, "reprocesado": True,
+            }, ensure_ascii=False), inscripcion_id))
+        conn.commit(); cur.close(); conn.close()
+        return (json.dumps({"ok": True, "token": token, "estado": "rechazado", "motivo_rechazo": motivo}), 200, HEADERS)
+
+    # ── Regla 4: crónico complejo → manejo manual por correo ──
+    if programa_detectado == "cronico_complejo":
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET estado = 'derivado_manual', programa = %s, cie10_detectado = %s, diagnostico_detectado = %s,
+                nombre_paciente_receta = %s, fecha_receta = %s, actualizado_at = NOW()
+            WHERE id = %s
+        """, (programa_detectado, cie10_match, descripcion_match, nombre_receta, fecha_receta_parsed, inscripcion_id))
+        conn.commit()
+
+        try:
+            enviar_correo_cronico_complejo(
+                nombres=datos_dni.get("nombres"), apellidos=datos_dni.get("apellidos"),
+                n_documento=n_documento, celular=celular, correo_paciente=correo,
+                programa=programa_detectado, dni_anverso_url=dni_anverso_url,
+                dni_reverso_url=dni_reverso_url, receta_url=url_receta_bucket,
+            )
+        except Exception as e:
+            logging.warning(f"[reprocesar-cronico] No se pudo enviar correo derivado_manual: {e}")
+
+        cur.close(); conn.close()
+        return (json.dumps({
+            "ok": True, "token": token, "estado": "derivado_manual",
+            "motivo_rechazo": "Tu caso requiere evaluación del equipo de Programa de Salud. Te contactarán pronto."
+        }), 200, HEADERS)
+
+    # ── Todo OK: listo para firmar ──
+    cur.execute("""
+        UPDATE sofi_programa_cronico_inscripciones
+        SET estado = 'dni_recibido', programa = %s, cie10_detectado = %s, diagnostico_detectado = %s,
+            nombre_paciente_receta = %s, fecha_receta = %s, fecha_dni_recibido = NOW(),
+            motivo_rechazo = NULL, intentos_recordatorio = 0, fecha_ultimo_recordatorio = NULL,
+            actualizado_at = NOW()
+        WHERE id = %s
+    """, (programa_detectado, cie10_match, descripcion_match, nombre_receta, fecha_receta_parsed, inscripcion_id))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "ok": True, "token": token, "estado": "dni_recibido", "programa": programa_detectado,
+        "link_firma": f"https://sntspe.com/programa-cronico/{token}"
+    }), 200, HEADERS)
+
 # ──────────────────────────────────
 # API: /Reenvio manual de correos
 # ──────────────────────────────────
 @con_log_errores
 def handle_reenviar_danaconnect(request):
     data = request.get_json(force=True, silent=True) or {}
+
+    if data.get("pw") != ADMIN_PW_CRONICO:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
     token = data.get("token")
 
     if not token:
@@ -6639,8 +7534,191 @@ def handle_reenviar_danaconnect(request):
     else:
         return (json.dumps({"ok": False, "token": token, "danaconnect_enviado": False, "error": danaconnect_error_msg}), 502, HEADERS)
 
-ADMIN_PW_CRONICO = os.environ.get("ADMIN_PW_CRONICO")
 
+# ─────────────────────────────────────────────
+# TAREA: /programa-cronico/recordatorio
+# SMS a inscripciones con DNI recibido que aún no firman
+# Cloud Scheduler: 1 vez al día, ej. 10:00 lun-sab
+# ─────────────────────────────────────────────
+INTERVALOS_RECORDATORIO_CRONICO = {
+    1: timedelta(hours=2),   # 1er recordatorio
+    2: timedelta(hours=6),   # 2do: recordatorio
+    3: timedelta(hours=24),     # 3ro (último): 
+}
+MAX_INTENTOS_RECORDATORIO_CRONICO = 3
+DANACONNECT_CONVERSATION_ID_RECORDATORIO_CRONICO = "605087"
+
+def enviar_correo_recordatorio_cronico(token, correo, nombres):
+    """
+    Envía el recordatorio por correo vía Danaconnect (conversación 605086).
+    Usa Basic Auth (DANACONNECT_USER/DANACONNECT_PASSWORD), igual que
+    iniciar_conversacion_danaconnect / iniciar_conversacion_cronico_complejo,
+    NO el header DANACONNECT_AUTH que usa enviar_danaconnect() para SMS.
+    """
+    if not correo:
+        return False
+
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link = f"{base_url}/programa-cronico/{token}"
+
+    # Solo el primer nombre (nombres puede traer más de uno separado por espacio)
+    primer_nombre = (nombres or "").strip().split(" ")[0] if nombres else ""
+
+    url = f"https://appserv.danaconnect.com/api/1.0/rest/conversation/{DANACONNECT_CONVERSATION_ID_RECORDATORIO_CRONICO}/start/data"
+    payload = {
+        "EMAIL": correo,
+        "NOMBRE": primer_nombre,
+        "URL": link,
+    }
+
+    try:
+        resp = requests.post(
+            url,
+            auth=(DANACONNECT_USER, DANACONNECT_PASSWORD),
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"Error al enviar correo de recordatorio a {correo}: {e}")
+        return False
+
+@con_log_errores
+def handle_forzar_recordatorio_cronico(request):
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("pw") != ADMIN_PW_CRONICO:
+        return (json.dumps({"error": "No autorizado"}), 401, HEADERS)
+
+    token = data.get("token")
+    if not token:
+        return (json.dumps({"error": "token es requerido"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT estado, celular, nombres, correo, intentos_recordatorio
+        FROM sofi_programa_cronico_inscripciones WHERE token = %s
+    """, (token,))
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Token no encontrado"}), 404, HEADERS)
+
+    estado, celular, nombres, correo, intentos = row
+
+    if estado != "dni_recibido":
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": f"Solo se puede forzar el envío en estado dni_recibido (actual: {estado})"
+        }), 409, HEADERS)
+
+    ahora = datetime.now(LIMA_TZ).replace(tzinfo=None)
+    siguiente_intento = (intentos or 0) + 1
+
+    enviado = _enviar_recordatorio_cronico(token, celular, nombres, correo)
+
+    if enviado:
+        cur.execute("""
+            UPDATE sofi_programa_cronico_inscripciones
+            SET intentos_recordatorio = %s, fecha_ultimo_recordatorio = %s
+            WHERE token = %s
+        """, (siguiente_intento, ahora, token))
+        conn.commit()
+
+    cur.close(); conn.close()
+
+    return (json.dumps({"ok": enviado, "token": token, "intento_numero": siguiente_intento}), 200, HEADERS)
+
+def _enviar_recordatorio_cronico(token, celular, nombres, correo=None):
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link = f"{base_url}/programa-cronico/{token}"
+    nombre_limpio = _limpiar_nombre_sms(nombres or "")
+    saludo = f"Hola {nombre_limpio}, " if nombre_limpio else "Hola, "
+    mensaje = f"Sanitas: {saludo}completa y firma tu inscripcion al Programa de Salud: {link}"
+
+    numero = _normalizar_celular_pe(celular)
+    sms_enviado = False
+    if numero:
+        enviar_danaconnect(numero, mensaje)
+        sms_aviso(numero, "recordatorio programa cronico")
+        sms_enviado = True
+
+    correo_enviado = enviar_correo_recordatorio_cronico(token, correo, nombres)
+
+    # Se considera "enviado" si al menos uno de los dos canales funcionó
+    return sms_enviado or correo_enviado
+
+
+def handle_recordatorio_cronico(request):
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT token, celular, nombres, correo, intentos_recordatorio,
+                   COALESCE(fecha_ultimo_recordatorio, fecha_dni_recibido) AS fecha_referencia
+            FROM sofi_programa_cronico_inscripciones
+            WHERE estado = 'dni_recibido'
+              AND COALESCE(intentos_recordatorio, 0) < %s
+              AND fecha_dni_recibido IS NOT NULL
+        """, (MAX_INTENTOS_RECORDATORIO_CRONICO,))
+        candidatos = cur.fetchall()
+
+        ahora = datetime.now(LIMA_TZ).replace(tzinfo=None)
+        enviados = 0
+        omitidos_sin_celular = 0
+        errores = []
+
+        for token, celular, nombres, correo, intentos, fecha_referencia in candidatos:
+            try:
+                intentos = intentos or 0
+                siguiente_intento = intentos + 1
+                espera = INTERVALOS_RECORDATORIO_CRONICO.get(siguiente_intento)
+                if not espera:
+                    continue
+                if not celular and not correo:
+                    omitidos_sin_celular += 1
+                    continue
+
+                if fecha_referencia and getattr(fecha_referencia, "tzinfo", None):
+                    fecha_referencia = fecha_referencia.replace(tzinfo=None)
+
+                if not fecha_referencia or (ahora - fecha_referencia) < espera:
+                    continue
+
+                if _enviar_recordatorio_cronico(token, celular, nombres, correo):
+                    cur.execute("""
+                        UPDATE sofi_programa_cronico_inscripciones
+                        SET intentos_recordatorio = %s, fecha_ultimo_recordatorio = %s
+                        WHERE token = %s
+                    """, (siguiente_intento, ahora, token))
+                    conn.commit()
+                    enviados += 1
+
+            except Exception as e_candidato:
+                conn.rollback()
+                errores.append({"token": token, "error": str(e_candidato)})
+                continue
+
+        return (json.dumps({
+            "mensaje": f"Recordatorios enviados: {enviados} de {len(candidatos)} candidatos evaluados",
+            "omitidos_sin_celular": omitidos_sin_celular,
+            "errores": errores
+        }), 200, HEADERS)
+
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+ADMIN_PW_CRONICO = os.environ.get("ADMIN_PW_CRONICO")
 # ─────────────────────
 # API: /programa-cronico/reporte
 def handle_reporte_cronico(request):
@@ -6659,7 +7737,8 @@ def handle_reporte_cronico(request):
                    programa, estado, motivo_rechazo, diagnostico_detectado, cie10_detectado,
                    dni_foto_anverso_url, dni_foto_reverso_url, url_receta,
                    pdf_consentimiento_url, danaconnect_enviado, danaconnect_error,
-                   creado_at, firmado_at
+                   creado_at, firmado_at,
+                   intentos_recordatorio, fecha_ultimo_recordatorio, datos_ocr_raw
             FROM sofi_programa_cronico_inscripciones
             WHERE 1=1
         """
@@ -6697,7 +7776,8 @@ def handle_reporte_cronico(request):
          programa, estado, motivo_rechazo, diagnostico_detectado, cie10_detectado,
          dni_anverso_url, dni_reverso_url, url_receta,
          pdf_url, dana_enviado, dana_error,
-         creado_at, firmado_at) = row
+         creado_at, firmado_at,
+         intentos_recordatorio, fecha_ultimo_recordatorio, datos_ocr_raw) = row
 
         color_estado = COLOR_ESTADO.get(estado, "#555")
         nombre_completo = f"{nombres or ''} {apellidos or ''}".strip() or "—"
@@ -6719,9 +7799,42 @@ def handle_reporte_cronico(request):
                 dana_badge = '<span style="color:#2e7d32;">✓ Dana</span>'
             else:
                 error_txt = (dana_error or "sin enviar")[:60]
-                dana_badge = f'<span style="color:#c62828;" title="{dana_error or ""}">✗ Dana ({error_txt})</span>'
+                dana_badge = (
+                    f'<span style="color:#c62828;" title="{dana_error or ""}">✗ Dana ({error_txt})</span>'
+                    f'<br><button class="btn-reenviar" data-token="{token}" onclick="reenviarDana(this)">🔁 Reenviar</button>'
+                )
+
+        # ── Badge de recordatorios ──
+        recordatorio_html = "—"
+        if estado == "dni_recibido":
+            intentos_val = intentos_recordatorio or 0
+            if intentos_val > 0:
+                fecha_ult = fecha_ultimo_recordatorio.strftime('%d/%m/%Y %H:%M') if fecha_ultimo_recordatorio else "—"
+                color_rec = "#ef6c00" if intentos_val < MAX_INTENTOS_RECORDATORIO_CRONICO else "#c62828"
+                recordatorio_html = f'<span style="color:{color_rec};">{intentos_val}/{MAX_INTENTOS_RECORDATORIO_CRONICO} enviados</span><br><span style="font-size:11px;color:#888;">{fecha_ult}</span>'
+            else:
+                recordatorio_html = '<span style="color:#888;">Sin enviar</span>'
 
         motivo_html = f'<div style="font-size:12px;color:#c62828;">{motivo_rechazo}</div>' if motivo_rechazo else ""
+        if estado == "rechazado" and datos_ocr_raw:
+            import html as html_lib
+            ocr_pretty = html_lib.escape(json.dumps(datos_ocr_raw, indent=2, ensure_ascii=False))
+            motivo_html += f'<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:#888;">Ver OCR crudo</summary><pre style="font-size:10px;white-space:pre-wrap;max-width:280px;overflow-x:auto;">{ocr_pretty}</pre></details>'
+
+        if estado in ("rechazado", "derivado_manual"):
+            motivo_html += f'<br><button class="btn-reprocesar" data-token="{token}" onclick="reprocesarCronico(this)">🔄 Reprocesar</button>'
+            motivo_html += f"""
+            <div style="margin-top:6px;">
+                <select class="select-aprobar" id="sel_{token}" style="font-size:11px;padding:3px;border-radius:4px;">
+                    <option value="vive_sano_completo">Vive Sano</option>
+                    <option value="krystal">Krystal</option>
+                </select>
+                <button class="btn-aprobar" data-token="{token}" onclick="aprobarManualCronico(this)">✅ Aprobar manual</button>
+            </div>"""
+
+        if estado == "dni_recibido":
+            motivo_html += f'<br><button class="btn-forzar" data-token="{token}" onclick="forzarRecordatorioCronico(this)">📨 Enviar recordatorio ahora</button>'
+        
         diagnostico_html = f"{diagnostico_detectado or ''} ({cie10_detectado or ''})" if diagnostico_detectado else "—"
 
         filas_html += f"""
@@ -6732,6 +7845,7 @@ def handle_reporte_cronico(request):
             <td>{programa or '—'}</td>
             <td>{diagnostico_html}</td>
             <td><span style="color:{color_estado};font-weight:600;">{estado}</span>{motivo_html}</td>
+            <td>{recordatorio_html}</td>
             <td>{links_html}</td>
             <td>{dana_badge}</td>
             <td><span style="font-size:11px;color:#aaa;">{token}</span></td>
@@ -6772,6 +7886,14 @@ def handle_reporte_cronico(request):
     .contador {{ font-size: 12px; color: #888; margin-bottom: 10px; }}
     a {{ color: #0090A6; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
+    .btn-reenviar {{ margin-top:4px; padding:4px 10px; font-size:11px; background:#0090A6; color:#fff; border:none; border-radius:5px; cursor:pointer; }}
+    .btn-reenviar:disabled {{ background:#9bb6d6; cursor:not-allowed; }}
+    .btn-reprocesar {{ margin-top:4px; padding:4px 10px; font-size:11px; background:#ef6c00; color:#fff; border:none; border-radius:5px; cursor:pointer; }}
+    .btn-reprocesar:disabled {{ background:#f0b783; cursor:not-allowed; }}
+    .btn-aprobar {{ margin-top:2px; padding:4px 10px; font-size:11px; background:#2e7d32; color:#fff; border:none; border-radius:5px; cursor:pointer; }}
+    .btn-aprobar:disabled {{ background:#a5c9a8; cursor:not-allowed; }}
+    .btn-forzar {{ margin-top:4px; padding:4px 10px; font-size:11px; background:#0090A6; color:#fff; border:none; border-radius:5px; cursor:pointer; }}
+    .btn-forzar:disabled {{ background:#8fc7d0; cursor:not-allowed; }}
 </style>
 </head>
 <body>
@@ -6794,6 +7916,7 @@ def handle_reporte_cronico(request):
         <select name="programa">{opciones_programa_html}</select>
     </div>
     <button type="submit">Filtrar</button>
+    <a href="/programa-cronico/estadistica?pw={pw}" style="padding:8px 16px;background:#0090A6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;display:inline-block;">📊 Ver estadísticas</a>
 </form>
 
 <div class="contador">{len(registros)} registro(s) (máx. 500)</div>
@@ -6807,6 +7930,7 @@ def handle_reporte_cronico(request):
             <th>Programa</th>
             <th>Diagnóstico (CIE-10)</th>
             <th>Estado</th>
+            <th>Recordatorios</th>
             <th>Archivos</th>
             <th>Danaconnect</th>
             <th>Token</th>
@@ -6815,12 +7939,499 @@ def handle_reporte_cronico(request):
     <tbody>
         {filas_html}
     </tbody>
-</table>
+    </table>
 
-</body>
-</html>"""
+    <script>
+    async function reenviarDana(btn) {{
+        const token = btn.dataset.token;
+        if (!confirm("¿Reenviar el consentimiento a Danaconnect?")) return;
+        btn.disabled = true;
+        btn.textContent = "Enviando...";
+        try {{
+            const resp = await fetch("/programa-cronico/reenviar-danaconnect", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ pw: "{pw}", token: token }})
+            }});
+            const data = await resp.json();
+            if (resp.ok && data.ok) {{
+                btn.closest("td").innerHTML = '<span style="color:#2e7d32;">✓ Dana</span>';
+            }} else {{
+                alert("Error: " + (data.error || "No se pudo reenviar"));
+                btn.disabled = false;
+                btn.textContent = "🔁 Reenviar";
+            }}
+        }} catch (e) {{
+            alert("Error de conexión");
+            btn.disabled = false;
+            btn.textContent = "🔁 Reenviar";
+        }}
+    }}
+
+    async function reprocesarCronico(btn) {{
+        const token = btn.dataset.token;
+        if (!confirm("¿Volver a leer los documentos y re-evaluar esta inscripción?")) return;
+        btn.disabled = true;
+        btn.textContent = "Procesando...";
+        try {{
+            const resp = await fetch("/programa-cronico/reprocesar", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ pw: "{pw}", token: token }})
+            }});
+            const data = await resp.json();
+            if (resp.ok && data.ok) {{
+                alert("Nuevo estado: " + data.estado + (data.motivo_rechazo ? "\\nMotivo: " + data.motivo_rechazo : ""));
+                location.reload();
+            }} else {{
+                alert("Error: " + (data.error || "No se pudo reprocesar"));
+                btn.disabled = false;
+                btn.textContent = "🔄 Reprocesar";
+            }}
+        }} catch (e) {{
+            alert("Error de conexión");
+            btn.disabled = false;
+            btn.textContent = "🔄 Reprocesar";
+        }}
+    }}
+
+    async function aprobarManualCronico(btn) {{
+        const token = btn.dataset.token;
+        const select = document.getElementById("sel_" + token);
+        const programa = select.value;
+        const nombrePrograma = select.options[select.selectedIndex].text;
+
+        if (!confirm(`¿Aprobar manualmente esta inscripción como "${{nombrePrograma}}"? Se le avisará al paciente que ya puede firmar.`)) return;
+
+        btn.disabled = true;
+        btn.textContent = "Aprobando...";
+        try {{
+            const resp = await fetch("/programa-cronico/aprobar-manual", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ pw: "{pw}", token: token, programa: programa }})
+            }});
+            const data = await resp.json();
+            if (resp.ok && data.ok) {{
+                alert("Aprobado. El paciente ya puede firmar en: " + data.link_firma);
+                location.reload();
+            }} else {{
+                alert("Error: " + (data.error || "No se pudo aprobar"));
+                btn.disabled = false;
+                btn.textContent = "✅ Aprobar manual";
+            }}
+        }} catch (e) {{
+            alert("Error de conexión");
+            btn.disabled = false;
+            btn.textContent = "✅ Aprobar manual";
+        }}
+    }}
+
+    async function forzarRecordatorioCronico(btn) {{
+        const token = btn.dataset.token;
+        if (!confirm("¿Enviar el recordatorio (SMS + correo) ahora mismo, sin esperar el intervalo programado?")) return;
+
+        btn.disabled = true;
+        btn.textContent = "Enviando...";
+        try {{
+            const resp = await fetch("/programa-cronico/forzar-recordatorio", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ pw: "{pw}", token: token }})
+            }});
+            const data = await resp.json();
+            if (resp.ok && data.ok) {{
+                alert("Recordatorio #" + data.intento_numero + " enviado correctamente.");
+                location.reload();
+            }} else {{
+                alert("Error: " + (data.error || "No se pudo enviar"));
+                btn.disabled = false;
+                btn.textContent = "📨 Enviar recordatorio ahora";
+            }}
+        }} catch (e) {{
+            alert("Error de conexión");
+            btn.disabled = false;
+            btn.textContent = "📨 Enviar recordatorio ahora";
+        }}
+    }}
+    </script>
+    </body>
+    </html>"""
 
     return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+# ─────────────────────────────────────────────────────────────
+# API: /programa-cronico/estadistica
+# ─────────────────────────────────────────────────────────────
+def handle_estadistica_cronico(request):
+    import html as html_lib
+    from collections import Counter
+
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_CRONICO:
+        return "No autorizado", 401
+
+    fecha_inicio = request.args.get("fecha_inicio", "").strip()
+    fecha_fin = request.args.get("fecha_fin", "").strip()
+    filtro_programa = request.args.get("programa", "").strip()
+
+    # Sin fechas -> por defecto, el mes actual completo hasta hoy
+    if not fecha_inicio or not fecha_fin:
+        hoy = datetime.now(LIMA_TZ).date()
+        fecha_inicio = hoy.replace(day=1).strftime("%Y-%m-%d")
+        fecha_fin = hoy.strftime("%Y-%m-%d")
+
+    try:
+        fecha_inicio_obj = datetime.strptime(fecha_inicio, "%Y-%m-%d").date()
+        fecha_fin_obj = datetime.strptime(fecha_fin, "%Y-%m-%d").date()
+    except ValueError:
+        return ("""<html><body style="font-family:Arial;padding:40px;">
+            <h2>Error en las fechas</h2><p>Usa el formato YYYY-MM-DD.</p>
+            <a href="javascript:history.back()">Volver</a></body></html>""",
+            400, {"Content-Type": "text/html; charset=utf-8"})
+
+    if fecha_inicio_obj > fecha_fin_obj:
+        return ("""<html><body style="font-family:Arial;padding:40px;">
+            <h2>Rango de fechas inválido</h2><p>La fecha desde no puede ser mayor que la fecha hasta.</p>
+            <a href="javascript:history.back()">Volver</a></body></html>""",
+            400, {"Content-Type": "text/html; charset=utf-8"})
+
+    where = "WHERE creado_at >= %s::date AND creado_at < (%s::date + INTERVAL '1 day')"
+    params_base = [fecha_inicio, fecha_fin]
+    if filtro_programa:
+        where += " AND programa = %s"
+        params_base.append(filtro_programa)
+
+    conn = None
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE estado = 'firmado') AS firmados,
+                    COUNT(*) FILTER (WHERE estado = 'rechazado') AS rechazados,
+                    COUNT(*) FILTER (WHERE estado = 'dni_recibido') AS dni_recibido,
+                    COUNT(*) FILTER (WHERE estado = 'esperando_dni') AS esperando_dni,
+                    COUNT(*) FILTER (WHERE estado = 'derivado_manual') AS derivados_manual
+                FROM sofi_programa_cronico_inscripciones {where}
+            """, params_base)
+            total, firmados, rechazados, dni_recibido, esperando_dni, derivados_manual = cur.fetchone()
+
+            total = total or 0
+            firmados = firmados or 0
+            rechazados = rechazados or 0
+            dni_recibido = dni_recibido or 0
+            esperando_dni = esperando_dni or 0
+            derivados_manual = derivados_manual or 0
+
+            porcentaje_rechazo = (rechazados / total * 100) if total else 0
+            porcentaje_firmados = (firmados / total * 100) if total else 0
+
+            cur.execute(f"""
+                SELECT DATE(creado_at) AS fecha, COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE estado = 'firmado') AS firmados,
+                       COUNT(*) FILTER (WHERE estado = 'rechazado') AS rechazados
+                FROM sofi_programa_cronico_inscripciones {where}
+                GROUP BY DATE(creado_at) ORDER BY DATE(creado_at)
+            """, params_base)
+            registros_por_dia = cur.fetchall()
+
+            cur.execute(f"""
+                SELECT COALESCE(NULLIF(TRIM(motivo_rechazo), ''), 'Sin motivo registrado') AS motivo, COUNT(*) AS cantidad
+                FROM sofi_programa_cronico_inscripciones {where} AND estado = 'rechazado'
+                GROUP BY COALESCE(NULLIF(TRIM(motivo_rechazo), ''), 'Sin motivo registrado')
+                ORDER BY cantidad DESC
+            """, params_base)
+            rechazos_motivos = cur.fetchall()
+
+            cur.execute(f"""
+                SELECT COALESCE(programa, 'Sin programa') AS programa, COUNT(*) AS cantidad
+                FROM sofi_programa_cronico_inscripciones {where} AND estado = 'rechazado'
+                GROUP BY programa ORDER BY cantidad DESC
+            """, params_base)
+            rechazos_programa = cur.fetchall()
+
+            motivo_diagnostico = "Ninguno de los diagnósticos de la receta corresponde a un programa disponible"
+            cur.execute(f"""
+                SELECT token, n_documento, nombres, apellidos, datos_ocr_raw
+                FROM sofi_programa_cronico_inscripciones {where}
+                  AND estado = 'rechazado' AND motivo_rechazo = %s AND datos_ocr_raw IS NOT NULL
+            """, params_base + [motivo_diagnostico])
+            rechazados_diagnostico = cur.fetchall()
+
+            contador_diagnosticos = Counter()
+            detalles_diagnosticos = {}
+
+            for token, n_documento, nombres, apellidos, datos_ocr_raw in rechazados_diagnostico:
+                try:
+                    if isinstance(datos_ocr_raw, str):
+                        datos_ocr_raw = json.loads(datos_ocr_raw)
+                    if not isinstance(datos_ocr_raw, dict):
+                        continue
+
+                    datos_receta = datos_ocr_raw.get("datos_receta", {})
+                    if not isinstance(datos_receta, dict):
+                        continue
+
+                    diagnosticos = datos_receta.get("diagnosticos", [])
+                    if not isinstance(diagnosticos, list):
+                        continue
+
+                    for diagnostico in diagnosticos:
+                        if not isinstance(diagnostico, dict):
+                            continue
+
+                        cie10 = str(diagnostico.get("cie10") or diagnostico.get("CIE10") or "").strip()
+                        descripcion = str(diagnostico.get("descripcion") or diagnostico.get("diagnostico") or "").strip()
+                        if not cie10 and not descripcion:
+                            continue
+
+                        clave = (cie10.upper(), descripcion.upper())
+                        contador_diagnosticos[clave] += 1
+                        detalles_diagnosticos.setdefault(clave, {
+                            "cie10": cie10, "descripcion": descripcion, "casos": []
+                        })
+                        detalles_diagnosticos[clave]["casos"].append({
+                            "token": token, "dni": n_documento,
+                            "nombre": f"{nombres or ''} {apellidos or ''}".strip()
+                        })
+
+                except Exception as e_diag:
+                    logging.warning(f"[estadistica-cronico] Error procesando OCR token={token}: {e_diag}")
+
+            diagnosticos_estadistica = [
+                {"cie10": detalles_diagnosticos[clave]["cie10"],
+                 "descripcion": detalles_diagnosticos[clave]["descripcion"],
+                 "cantidad": cantidad,
+                 "casos": detalles_diagnosticos[clave]["casos"]}
+                for clave, cantidad in contador_diagnosticos.most_common()
+            ]
+
+    except Exception as e:
+        logging.exception("[estadistica-cronico] Error generando estadísticas")
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+    finally:
+        if conn:
+            conn.close()
+
+    # ═════════════════════════════════════════════
+    # HTML
+    # ═════════════════════════════════════════════
+    def esc(value):
+        return html_lib.escape(str(value if value is not None else ""))
+
+    nombres_programa = {
+        "vive_sano_completo": "Vive Sano", "krystal": "Krystal",
+        "cronico_complejo": "Crónico Complejo", "Sin programa": "Sin programa"
+    }
+    def nombre_programa(valor):
+        return nombres_programa.get(valor, valor or "Todos")
+
+    filas_dias = "".join(f"""
+        <tr>
+            <td>{fecha.strftime('%d/%m/%Y') if fecha else '—'}</td>
+            <td><strong>{cantidad}</strong></td>
+            <td style="color:#2e7d32;">{firmados_dia}</td>
+            <td style="color:#c62828;">{rechazados_dia}</td>
+            <td>{(rechazados_dia / cantidad * 100) if cantidad else 0:.1f}%</td>
+        </tr>
+    """ for fecha, cantidad, firmados_dia, rechazados_dia in registros_por_dia) or """
+        <tr><td colspan="5" style="text-align:center;color:#888;">No hay registros para el rango seleccionado.</td></tr>
+    """
+
+    filas_motivos = "".join(f"""
+        <tr>
+            <td>{esc(motivo)}</td>
+            <td><strong>{cantidad}</strong></td>
+            <td>{(cantidad / rechazados * 100) if rechazados else 0:.1f}%</td>
+        </tr>
+    """ for motivo, cantidad in rechazos_motivos) or """
+        <tr><td colspan="3" style="text-align:center;color:#888;">No hay rechazos en el rango seleccionado.</td></tr>
+    """
+
+    filas_programas_rechazo = "".join(f"""
+        <tr>
+            <td>{esc(nombre_programa(programa))}</td>
+            <td><strong>{cantidad}</strong></td>
+            <td>{(cantidad / rechazados * 100) if rechazados else 0:.1f}%</td>
+        </tr>
+    """ for programa, cantidad in rechazos_programa) or """
+        <tr><td colspan="3" style="text-align:center;color:#888;">No hay rechazos por programa.</td></tr>
+    """
+
+    filas_diagnosticos = "".join(f"""
+        <tr>
+            <td><strong>{esc(item["cie10"]) or "—"}</strong></td>
+            <td>{esc(item["descripcion"]) or "Sin descripción"}</td>
+            <td><strong>{item["cantidad"]}</strong></td>
+            <td>{(item["cantidad"] / rechazados * 100) if rechazados else 0:.1f}%</td>
+        </tr>
+    """ for item in diagnosticos_estadistica) or """
+        <tr><td colspan="4" style="text-align:center;color:#888;padding:20px;">
+            No se encontraron diagnósticos asociados a rechazos por diagnóstico en este período.
+        </td></tr>
+    """
+
+    opciones_programa = ["", "vive_sano_completo", "krystal", "cronico_complejo"]
+    opciones_programa_html = "".join(
+        f'<option value="{esc(p)}" {"selected" if p == filtro_programa else ""}>{esc(nombre_programa(p))}</option>'
+        for p in opciones_programa
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Estadística Programa Crónico</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 20px; color: #222; }}
+h1 {{ color: #0090A6; font-size: 22px; margin: 0 0 4px 0; }}
+.subtitulo {{ color: #888; font-size: 13px; margin-bottom: 20px; }}
+.filtros {{ background: #fff; border-radius: 10px; padding: 16px 18px; margin-bottom: 20px; display: flex; gap: 14px; align-items: end; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+.filtros label {{ font-size: 12px; font-weight: 600; display: block; margin-bottom: 5px; }}
+.filtros input, .filtros select {{ padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }}
+.filtros button {{ padding: 9px 18px; background: #0090A6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }}
+.filtros button:hover {{ opacity: .9; }}
+.rango {{ font-size: 12px; color: #777; margin-bottom: 16px; }}
+.cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 20px; }}
+.card {{ background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-top: 4px solid #0090A6; }}
+.card.rojo {{ border-top-color: #c62828; }}
+.card.verde {{ border-top-color: #2e7d32; }}
+.card.naranja {{ border-top-color: #ef6c00; }}
+.card.gris {{ border-top-color: #888; }}
+.card-titulo {{ color: #777; font-size: 12px; margin-bottom: 8px; }}
+.card-numero {{ font-size: 28px; font-weight: 700; color: #222; }}
+.card-extra {{ color: #888; font-size: 12px; margin-top: 5px; }}
+.seccion {{ background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
+.seccion h2 {{ margin: 0 0 14px 0; font-size: 16px; color: #0090A6; }}
+.grid-dos {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; margin-bottom: 20px; }}
+table {{ width: 100%; border-collapse: collapse; background: #fff; }}
+th {{ background: #0090A6; color: #fff; text-align: left; padding: 10px 12px; font-size: 12px; }}
+td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #eee; vertical-align: top; }}
+tr:hover {{ background: #f0f7f8; }}
+.contador {{ font-size: 12px; color: #888; margin-bottom: 10px; }}
+.info {{ background: #f0f7f8; border-left: 4px solid #0090A6; padding: 12px 14px; margin-bottom: 15px; border-radius: 5px; font-size: 13px; }}
+@media (max-width: 700px) {{
+    body {{ padding: 10px; }}
+    .grid-dos {{ grid-template-columns: 1fr; }}
+    .seccion {{ padding: 12px; overflow-x: auto; }}
+}}
+</style>
+</head>
+<body>
+<h1>Estadística — Programa de Pacientes Crónicos</h1>
+<div class="subtitulo">Vive Sano · Krystal · Crónico Complejo</div>
+
+<form class="filtros" method="GET" action="/programa-cronico/estadistica">
+    <input type="hidden" name="pw" value="{esc(pw)}">
+    <div><label>Fecha desde</label><input type="date" name="fecha_inicio" value="{esc(fecha_inicio)}"></div>
+    <div><label>Fecha hasta</label><input type="date" name="fecha_fin" value="{esc(fecha_fin)}"></div>
+    <div><label>Programa</label><select name="programa">{opciones_programa_html}</select></div>
+    <button type="submit">Actualizar estadísticas</button>
+    <a href="/programa-cronico/reporte?pw={esc(pw)}" style="padding:9px 18px;background:#888;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;text-decoration:none;display:inline-block;">← Volver al reporte</a>
+</form>
+
+<div class="rango">
+    Período: <strong>{fecha_inicio_obj.strftime('%d/%m/%Y')}</strong> al <strong>{fecha_fin_obj.strftime('%d/%m/%Y')}</strong>
+    · Programa: <strong>{esc(nombre_programa(filtro_programa))}</strong>
+</div>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-titulo">TOTAL INSCRIPCIONES</div>
+        <div class="card-numero">{total}</div>
+        <div class="card-extra">En el período seleccionado</div>
+    </div>
+    <div class="card verde">
+        <div class="card-titulo">FIRMADOS</div>
+        <div class="card-numero" style="color:#2e7d32;">{firmados}</div>
+        <div class="card-extra">{porcentaje_firmados:.1f}% del total</div>
+    </div>
+    <div class="card rojo">
+        <div class="card-titulo">RECHAZADOS</div>
+        <div class="card-numero" style="color:#c62828;">{rechazados}</div>
+        <div class="card-extra">{porcentaje_rechazo:.1f}% del total</div>
+    </div>
+    <div class="card">
+        <div class="card-titulo">DNI RECIBIDO</div>
+        <div class="card-numero">{dni_recibido}</div>
+        <div class="card-extra">Pendientes de firma</div>
+    </div>
+    <div class="card gris">
+        <div class="card-titulo">ESPERANDO DNI</div>
+        <div class="card-numero">{esperando_dni}</div>
+        <div class="card-extra">Inscripciones iniciadas</div>
+    </div>
+    <div class="card naranja">
+        <div class="card-titulo">DERIVADOS MANUALMENTE</div>
+        <div class="card-numero" style="color:#ef6c00;">{derivados_manual}</div>
+        <div class="card-extra">Revisión del equipo</div>
+    </div>
+</div>
+
+<div class="seccion">
+    <h2>Rechazos por motivo</h2>
+    <div class="contador">Total rechazados: <strong>{rechazados}</strong></div>
+    <table>
+        <thead><tr><th>Motivo de rechazo</th><th>Cantidad</th><th>% de rechazados</th></tr></thead>
+        <tbody>{filas_motivos}</tbody>
+    </table>
+</div>
+
+<div class="grid-dos">
+    <div class="seccion">
+        <h2>Rechazos por programa</h2>
+        <table>
+            <thead><tr><th>Programa</th><th>Cantidad</th><th>%</th></tr></thead>
+            <tbody>{filas_programas_rechazo}</tbody>
+        </table>
+    </div>
+    <div class="seccion">
+        <h2>Resumen del período</h2>
+        <table>
+            <tbody>
+                <tr><td>Total</td><td><strong>{total}</strong></td></tr>
+                <tr><td>Firmados</td><td><strong>{firmados}</strong> ({porcentaje_firmados:.1f}%)</td></tr>
+                <tr><td>Rechazados</td><td><strong>{rechazados}</strong> ({porcentaje_rechazo:.1f}%)</td></tr>
+                <tr><td>DNI recibido</td><td><strong>{dni_recibido}</strong></td></tr>
+                <tr><td>Esperando DNI</td><td><strong>{esperando_dni}</strong></td></tr>
+                <tr><td>Derivados manualmente</td><td><strong>{derivados_manual}</strong></td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="seccion">
+    <h2>Diagnósticos que generan rechazo</h2>
+    <div class="info">
+        Esta sección analiza los diagnósticos encontrados en el OCR de las recetas rechazadas porque ninguno
+        de sus diagnósticos corresponde a un programa disponible. Sirve para identificar diagnósticos frecuentes
+        que podrían estar quedando fuera de los programas actuales.
+    </div>
+    <table>
+        <thead><tr><th>CIE-10</th><th>Diagnóstico</th><th>Casos</th><th>% de rechazados</th></tr></thead>
+        <tbody>{filas_diagnosticos}</tbody>
+    </table>
+</div>
+
+<div class="seccion">
+    <h2>Inscripciones por día</h2>
+    <table>
+        <thead><tr><th>Fecha</th><th>Total</th><th>Firmados</th><th>Rechazados</th><th>% rechazo</th></tr></thead>
+        <tbody>{filas_dias}</tbody>
+    </table>
+</div>
+</body>
+</html>
+"""
+
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
 
 # ──────────────────────────────────────────
 # Lógica compartida: actualizar celular/correo
@@ -8434,6 +10045,12 @@ def _normalizar_celular_pe(celular):
     """
     if not celular:
         return None
+
+    # Detecta wa_id ofuscado de WhatsApp (número oculto), ej: "PE.1081517251058054"
+    if re.match(r"^[A-Z]{2}\.\d+$", celular):
+        logging.warning(f"[Afiliacion] Celular es un wa_id ofuscado (número oculto por WhatsApp), no se puede enviar SMS: {celular}")
+        return None
+        
     limpio = re.sub(r"[^\d]", "", celular)  # solo dígitos
 
     if len(limpio) == 9 and limpio.startswith("9"):
@@ -9650,3 +11267,1962 @@ def handle_reporte_excel_afiliacion(request):
             "Content-Disposition": f"attachment; filename={nombre_archivo}",
         },
     )
+
+# ─────────────────────────────────────────────
+# SYNC: Excel Rechazados -> tabla local (cada 15 min)
+# ─────────────────────────────────────────────
+def sincronizar_rechazados_excel():
+    #url = (
+    #    "https://docs.google.com/spreadsheets/d/"
+    #    "1dJdYBQqzjilP7SXLsb6OSgi_wOqn8DrxfiQ6-OtNcM8"
+    #    "/gviz/tq?tqx=out:csv"
+    #    "&gid=577147525"
+    #    f"&t={int(time.time())}"
+        
+    #)
+    url = ("https://docs.google.com/spreadsheets/d/e/2PACX-1vTzkoWIfO26i83Vfzejemnxjq40HRpkJH9NxrO3eGwqcNAk6iWcNoC0r712wKDwIxGL16EpyEC68V1Z/pub?gid=577147525&single=true&output=csv&t={int(time.time())}")
+
+    lines = safe_read_csv(url)
+    if not lines:
+        print("[sync_rechazados] No se pudo leer el archivo, se reintentará en el próximo ciclo.")
+        return "Error lectura CSV"
+
+    last2000 = lines[max(0, len(lines) - 2000):]
+    reader   = csv.reader(last2000)
+
+    valores = []
+    for row in reader:
+        if not row:
+            continue
+
+        row_2  = row[2].strip()  if len(row) > 2  else ""
+        row_4  = row[4].strip()  if len(row) > 4  else ""
+        row_21 = row[21].strip() if len(row) > 21 else ""
+        row_23 = row[23].strip() if len(row) > 23 else ""
+
+        if not row_23:
+            continue
+
+        try:
+            fecha_parsed = datetime.strptime(row_23, "%d/%m/%Y").date()
+        except ValueError:
+            continue
+
+        valores.append((row_2, row_4, row_21, row_23, fecha_parsed))
+
+    if not valores:
+        return "Sin filas válidas para sincronizar"
+
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("TRUNCATE TABLE sofi_rechazados_raw")
+    execute_values(cur, """
+        INSERT INTO sofi_rechazados_raw
+            (sol, nombre, celular, fecha_rechazo_raw, fecha_rechazo)
+        VALUES %s
+    """, valores, page_size=500)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return f"Sincronizados: {len(valores)} registros"
+
+
+def handle_sync_rechazados_excel(request):
+    try:
+        resultado = sincronizar_rechazados_excel()
+        return (json.dumps({"mensaje": resultado}), 200, HEADERS)
+    except Exception as e:
+        return (json.dumps({"error": str(e)}), 500, HEADERS)
+
+
+# ───────────────────────────────────────────────────
+# Reporte de la venta por whatsApp
+# ───────────────────────────────────────────────────
+ADMIN_PW_SCTR_WSP = os.environ.get("ADMIN_PW_SCTR_WSP")
+
+BROKERS_PERMITIDOS_WSP_SCTR = ["CANAL DIGITAL VENTA DIRECTA", "VENTA DIRECTA"]
+
+@con_log_errores
+def handle_reporte_wsp_sctr_vencidos(request):
+    pw = request.args.get("pw")
+    if pw != ADMIN_PW_SCTR_WSP:
+        return ("No autorizado", 401, {"Content-Type": "text/html; charset=utf-8"})
+
+    hoy = date.today()
+    primer_dia_mes = hoy.replace(day=1).isoformat()
+
+    fecha_inicio = request.args.get("fecha_inicio") or primer_dia_mes
+    fecha_fin = request.args.get("fecha_fin") or hoy.isoformat()
+    solo_ventas = request.args.get("solo_ventas", "") == "si"
+
+    conn = get_connection()
+    with conn.cursor() as cur:
+        filtro_venta_sql = "AND sub.monto_abonado > 0" if solo_ventas else ""
+        cur.execute(f"""
+            SELECT * FROM (
+                SELECT
+                    a.ruc, a.celular, a.fecha AS fecha_envio,
+                    e.razon_social,
+                    EXISTS (
+                        SELECT 1 FROM sofi_bitacora b
+                        WHERE RIGHT(b.user_identifier, 9) = RIGHT(a.celular, 9)
+                          AND b.fecha > a.fecha
+                          AND b.fecha <= a.fecha + INTERVAL '5 days'
+                    ) AS leido,
+                    em.broker,
+                    em.monto_abonado
+                FROM sofi_wsp_avisos a
+                LEFT JOIN sctr_empresa e ON e.ruc = a.ruc
+                LEFT JOIN LATERAL (
+                    SELECT broker, monto_abonado
+                    FROM sctr_emisiones
+                    WHERE nro_doc = a.ruc
+                      AND inicio_vigencia >= a.fecha::date
+                      AND broker = ANY(%s)
+                    ORDER BY inicio_vigencia DESC
+                    LIMIT 1
+                ) em ON TRUE
+                WHERE a.fecha::date BETWEEN %s AND %s
+            ) sub
+            WHERE 1=1 {filtro_venta_sql}
+            ORDER BY fecha_envio DESC
+        """, (BROKERS_PERMITIDOS_WSP_SCTR, fecha_inicio, fecha_fin))
+        filas = cur.fetchall()
+    conn.close()
+
+    total_enviados = len(filas)
+    total_leidos = sum(1 for f in filas if f[4])
+
+    # Deduplicar ventas por RUC (un RUC puede tener 2+ celulares y por tanto
+    # 2+ filas de envío, pero la venta y el importe son un único registro)
+    ventas_por_ruc = {}
+    for ruc, celular, fecha_envio, razon_social, leido, broker, monto_abonado in filas:
+        if monto_abonado is not None and ruc not in ventas_por_ruc:
+            ventas_por_ruc[ruc] = float(monto_abonado)
+
+    total_ventas = len(ventas_por_ruc)
+    suma_montos = sum(ventas_por_ruc.values())
+
+    rucs_unicos_enviados = len({f[0] for f in filas})
+    tasa_lectura = round(100.0 * total_leidos / total_enviados, 1) if total_enviados else 0
+    tasa_conversion = round(100.0 * total_ventas / rucs_unicos_enviados, 1) if rucs_unicos_enviados else 0
+
+    filas_html = ""
+    for ruc, celular, fecha_envio, razon_social, leido, broker, monto_abonado in filas[:500]:
+        badge_leido = '<span class="badge badge-ok">✅ Leído</span>' if leido else '<span class="badge badge-neutro">— Sin confirmar</span>'
+        if monto_abonado is not None:
+            badge_venta = f'<span class="badge badge-ok">💰 S/ {monto_abonado:,.2f}</span>'
+        else:
+            badge_venta = '<span class="badge badge-neutro">—</span>'
+        filas_html += f"""<tr>
+            <td>{fecha_envio.strftime('%d/%m/%Y %H:%M') if fecha_envio else ''}</td>
+            <td>{ruc}</td>
+            <td>{razon_social or '—'}</td>
+            <td>{celular}</td>
+            <td>{badge_leido}</td>
+            <td>{broker or '—'}</td>
+            <td>{badge_venta}</td>
+        </tr>"""
+
+    aviso_limite = f'<p class="msg-aviso">Mostrando primeros 500 de {total_enviados} resultados. Afina el rango de fechas para ver menos.</p>' if total_enviados > 500 else ""
+
+    opcion_todos = 'selected' if not solo_ventas else ''
+    opcion_solo_ventas = 'selected' if solo_ventas else ''
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Venta de SCTR por whatsApp</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>{CAMPANIA_CSS}</style>
+</head>
+<body>
+<div class="topbar">
+    <h1>Venta de SCTR por whatsApp</h1>
+    <div class="subtitulo">Envíos, lecturas (accesos en los 5 días posteriores) y ventas de Venta Directa / Canal Digital</div>
+</div>
+<div class="contenedor">
+    <div class="card">
+        <form method="GET" action="/sctr/reporte-wsp" class="filtros">
+            <input type="hidden" name="pw" value="{pw}">
+            <div><label>Desde</label><input type="date" name="fecha_inicio" value="{fecha_inicio}"></div>
+            <div><label>Hasta</label><input type="date" name="fecha_fin" value="{fecha_fin}"></div>
+            <div>
+                <label>Mostrar</label>
+                <select name="solo_ventas">
+                    <option value="no" {opcion_todos}>Todos los envíos</option>
+                    <option value="si" {opcion_solo_ventas}>Solo ventas (importe &gt; 0)</option>
+                </select>
+            </div>
+            <button type="submit">Filtrar</button>
+        </form>
+    </div>
+
+    <div class="card" style="display:flex;gap:30px;flex-wrap:wrap;">
+        <div><div style="font-size:12px;color:var(--sanitas-gray);">Enviados</div><div style="font-size:24px;font-weight:700;">{total_enviados}</div></div>
+        <div><div style="font-size:12px;color:var(--sanitas-gray);">Leídos</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-teal-dark);">{total_leidos} ({tasa_lectura}%)</div></div>
+        <div><div style="font-size:12px;color:var(--sanitas-gray);">Ventas (RUC único)</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-success);">{total_ventas} ({tasa_conversion}%)</div></div>
+        <div><div style="font-size:12px;color:var(--sanitas-gray);">Importe total</div><div style="font-size:24px;font-weight:700;color:var(--sanitas-success);">S/ {suma_montos:,.2f}</div></div>
+    </div>
+
+    {aviso_limite}
+    <div class="table-wrap">
+        <table>
+        <tr><th>Fecha envío</th><th>RUC</th><th>Empresa</th><th>Celular</th><th>Lectura</th><th>Broker</th><th>Importe</th></tr>
+        {filas_html}
+        </table>
+    </div>
+</div>
+</body>
+</html>"""
+
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+
+# Ajusta a tus imports reales de conexión/logging del proyecto
+# from tu_modulo_db import get_connection
+# from tu_modulo_logging import con_log_errores
+
+# ───────────────────────────────────────────────────
+# Config
+# ───────────────────────────────────────────────────
+CHATTIGO_WEBHOOK_BASE_URL = "https://channels.chattigo.com/webhook/chattigo"
+
+CHATTIGO_WEBHOOK_USERNAME = os.environ.get("CHATTIGO_WEBHOOK_USERNAME")
+CHATTIGO_WEBHOOK_PASSWORD = os.environ.get("CHATTIGO_WEBHOOK_PASSWORD")
+
+CHATTIGO_AGENT_DID = os.environ.get("CHATTIGO_DID", "51955973936")
+CHATTIGO_DASHBOARD_PASSWORD = os.environ.get("CHATTIGO_DASHBOARD_PASSWORD")
+
+LIMA_TZ = pytz.timezone("America/Lima")
+
+STATUS_VALIDOS = ["ONLINE", "LOGOUT", "ALMUERZO", "REUNIÓN", "DESCANSO"]
+
+# Cache en memoria del token (vive mientras la instancia de Cloud Run esté activa)
+_token_cache = {"access_token": None, "expira_en": None}
+
+
+# ───────────────────────────────────────────────────
+# Login y consulta a Chattigo
+# ───────────────────────────────────────────────────
+def _obtener_token_chattigo_webhook():
+    """Login contra el servicio de webhook. Cachea el token en memoria ~8h."""
+    ahora = datetime.utcnow()
+    if _token_cache["access_token"] and _token_cache["expira_en"] and ahora < _token_cache["expira_en"]:
+        return _token_cache["access_token"]
+
+    resp = requests.post(
+        f"{CHATTIGO_WEBHOOK_BASE_URL}/login",
+        json={"username": CHATTIGO_WEBHOOK_USERNAME, "password": CHATTIGO_WEBHOOK_PASSWORD},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    token = data.get("access_token")
+    if not token:
+        raise Exception(f"Login Chattigo (webhook/agentes) falló: {data}")
+
+    _token_cache["access_token"] = token
+    _token_cache["expira_en"] = ahora + timedelta(hours=8) - timedelta(minutes=10)
+
+    return token
+
+
+def _obtener_agentes():
+    """Llama GET /agents/{did} y devuelve la lista de agentes."""
+    token = _obtener_token_chattigo_webhook()
+
+    resp = requests.get(
+        f"{CHATTIGO_WEBHOOK_BASE_URL}/agents/{CHATTIGO_AGENT_DID}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+
+    if resp.status_code == 401:
+        _token_cache["access_token"] = None
+        token = _obtener_token_chattigo_webhook()
+        resp = requests.get(
+            f"{CHATTIGO_WEBHOOK_BASE_URL}/agents/{CHATTIGO_AGENT_DID}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ───────────────────────────────────────────────────
+# Persistencia del histórico
+# ───────────────────────────────────────────────────
+@con_log_errores
+def _guardar_snapshot_agentes(cur, conn, agentes):
+    """Inserta una fila por agente en chattigo_agentes_historico."""
+    fecha_hora = datetime.now(LIMA_TZ)
+
+    cur.executemany(
+        """
+        INSERT INTO chattigo_agentes_historico
+            (id_agente, nombre_agente, direccion, max_chats, activo, status, id_client, grupos, fecha_hora)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        [
+            (
+                a.get("id"),
+                a.get("name"),
+                a.get("address"),
+                a.get("maxChats"),
+                a.get("active"),
+                a.get("status"),
+                a.get("idClient"),
+                ", ".join(g.get("name", "") for g in (a.get("groups") or [])) or None,
+                fecha_hora,
+            )
+            for a in agentes
+        ],
+    )
+    conn.commit()
+
+
+def _password_valida(request):
+    """
+    Password viaja en el BODY del POST (no en query string), para no dejarlo
+    expuesto en logs de acceso de Cloud Run ni en el historial del navegador.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+    except Exception:
+        body = {}
+    password_recibido = body.get("pass") or request.headers.get("X-Dashboard-Password")
+    return password_recibido == CHATTIGO_DASHBOARD_PASSWORD
+
+
+# ───────────────────────────────────────────────────
+# Handlers del router
+# ───────────────────────────────────────────────────
+@con_log_errores
+def handle_chattigo_snapshot(request):
+    """Snapshot en vivo de agentes (JSON) + guarda fila en histórico."""
+    if not _password_valida(request):
+        return (json.dumps({"error": "No autorizado"}), 401, {"Content-Type": "application/json"})
+
+    agentes = _obtener_agentes()
+
+    conn = get_connection()
+    cur = conn.cursor()
+    _guardar_snapshot_agentes(cur, conn, agentes)
+    cur.close()
+    conn.close()
+
+    total_agentes = len(agentes)
+    por_status = {}
+    for s in STATUS_VALIDOS:
+        por_status[s] = sum(1 for a in agentes if (a.get("status") or "").upper() == s)
+
+    en_linea = por_status.get("ONLINE", 0)
+
+    body = {
+        "resumen": {
+            "total_agentes": total_agentes,
+            "agentes_en_linea": en_linea,
+            "por_status": por_status,
+        },
+        "agentes": agentes,
+    }
+    return (json.dumps(body), 200, {"Content-Type": "application/json"})
+
+
+@con_log_errores
+def handle_chattigo_historico(request):
+    """Serie histórica para graficar tendencias. Body JSON: {"pass": "...", "horas": 24}"""
+    if not _password_valida(request):
+        return (json.dumps({"error": "No autorizado"}), 401, {"Content-Type": "application/json"})
+
+    body = request.get_json(silent=True) or {}
+    horas = int(body.get("horas", 24))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            date_trunc('minute', fecha_hora) AS minuto,
+            COUNT(DISTINCT id_agente) FILTER (WHERE status = 'ONLINE') AS en_linea,
+            COUNT(DISTINCT id_agente) AS total_reportado
+        FROM chattigo_agentes_historico
+        WHERE fecha_hora >= %s
+        GROUP BY 1
+        ORDER BY 1
+        """,
+        (datetime.now(LIMA_TZ) - timedelta(hours=horas),),
+    )
+    filas = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    serie = [
+        {
+            "fecha_hora": f[0].isoformat(),
+            "agentes_en_linea": int(f[1] or 0),
+            "total_reportado": int(f[2] or 0),
+        }
+        for f in filas
+    ]
+    return (json.dumps(serie), 200, {"Content-Type": "application/json"})
+
+
+@con_log_errores
+def handle_chattigo_dashboard(request):
+    """Sirve el HTML del dashboard."""
+    return (_DASHBOARD_HTML, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+
+_DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Chattigo - Agentes en línea</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; background:#f4f5f7; margin:0; padding:24px; color:#1f2430; }
+  .login-box { max-width:340px; margin:80px auto; background:#fff; padding:24px; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+  .login-box input { width:100%; padding:10px; margin:10px 0; border:1px solid #ddd; border-radius:6px; box-sizing:border-box; }
+  .login-box button { width:100%; padding:10px; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  #dashboard { display:none; max-width:1000px; margin:0 auto; }
+  h1 { font-size:20px; }
+  .cards { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
+  .card { background:#fff; border-radius:12px; padding:16px 20px; box-shadow:0 2px 10px rgba(0,0,0,.06); flex:1; min-width:150px; }
+  .card .valor { font-size:28px; font-weight:700; }
+  .card .label { font-size:12px; color:#6b7280; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.06);}
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #eee; font-size:14px; }
+  th { background:#fafafa; font-size:12px; text-transform:uppercase; color:#6b7280; }
+  .badge { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; }
+  .badge-ONLINE { background:#dcfce7; color:#166534; }
+  .badge-LOGOUT { background:#f3f4f6; color:#6b7280; }
+  .badge-ALMUERZO, .badge-REUNIÓN, .badge-DESCANSO { background:#fef3c7; color:#92400e; }
+  canvas { background:#fff; border-radius:12px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:24px; }
+  #actualizado { font-size:12px; color:#9ca3af; margin-bottom:16px; }
+</style>
+</head>
+<body>
+
+<div class="login-box" id="loginBox">
+  <h1>Acceso Dashboard Chattigo</h1>
+  <input type="password" id="passInput" placeholder="Password" />
+  <button onclick="iniciar()">Entrar</button>
+  <div id="loginError" style="color:#dc2626; font-size:13px; margin-top:8px;"></div>
+</div>
+
+<div id="dashboard">
+  <h1>Agentes en línea — Chattigo</h1>
+  <div id="actualizado"></div>
+  <div class="cards">
+    <div class="card"><div class="valor" id="c_online">-</div><div class="label">En línea</div></div>
+    <div class="card"><div class="valor" id="c_total">-</div><div class="label">Total agentes</div></div>
+    <div class="card"><div class="valor" id="c_almuerzo">-</div><div class="label">Almuerzo</div></div>
+    <div class="card"><div class="valor" id="c_reunion">-</div><div class="label">Reunión</div></div>
+    <div class="card"><div class="valor" id="c_descanso">-</div><div class="label">Descanso</div></div>
+  </div>
+  <canvas id="chartHistorico" height="90"></canvas>
+  <table>
+    <thead><tr><th>Estado</th><th>Agente</th><th>Ubicación</th><th>Máx. chats</th><th>Grupos</th></tr></thead>
+    <tbody id="tablaAgentes"></tbody>
+  </table>
+</div>
+
+<script>
+const URL_SNAPSHOT = "/chattigo/agentes/snapshot";
+const URL_HISTORICO = "/chattigo/agentes/historico";
+
+let PASS = "";
+let chart = null;
+
+function iniciar() {
+  PASS = document.getElementById("passInput").value;
+  cargarSnapshot(true);
+}
+
+async function cargarSnapshot(esLogin) {
+  try {
+    const r = await fetch(URL_SNAPSHOT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pass: PASS })
+    });
+    if (r.status === 401) {
+      if (esLogin) document.getElementById("loginError").innerText = "Password incorrecto";
+      return;
+    }
+    const data = await r.json();
+    if (esLogin) {
+      document.getElementById("loginBox").style.display = "none";
+      document.getElementById("dashboard").style.display = "block";
+      cargarHistorico();
+      setInterval(cargarSnapshot, 30000);
+      setInterval(cargarHistorico, 60000);
+    }
+    pintarSnapshot(data);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function pintarSnapshot(data) {
+  const r = data.resumen;
+  document.getElementById("c_online").innerText = r.agentes_en_linea;
+  document.getElementById("c_total").innerText = r.total_agentes;
+  document.getElementById("c_almuerzo").innerText = r.por_status.ALMUERZO ?? 0;
+  document.getElementById("c_reunion").innerText = r.por_status["REUNIÓN"] ?? 0;
+  document.getElementById("c_descanso").innerText = r.por_status.DESCANSO ?? 0;
+  document.getElementById("actualizado").innerText = "Actualizado: " + new Date().toLocaleTimeString('es-PE');
+
+  const tbody = document.getElementById("tablaAgentes");
+  tbody.innerHTML = "";
+  data.agentes.forEach(a => {
+    const grupos = (a.groups || []).map(g => g.name).join(", ") || "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="badge badge-${a.status}">${a.status || '-'}</span></td>
+      <td>${a.name || '-'}</td>
+      <td>${a.address || '-'}</td>
+      <td>${a.maxChats ?? '-'}</td>
+      <td>${grupos}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if (data.agentes.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Sin agentes conectados en este momento</td></tr>';
+  }
+}
+
+async function cargarHistorico() {
+  try {
+    const r = await fetch(URL_HISTORICO, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pass: PASS, horas: 24 })
+    });
+    const serie = await r.json();
+    const labels = serie.map(p => new Date(p.fecha_hora).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'}));
+    const online = serie.map(p => p.agentes_en_linea);
+
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('chartHistorico').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Agentes en línea', data: online, borderColor: '#22c55e', tension: 0.3 },
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+</script>
+</body>
+</html>
+"""
+# ───────────────────────────────────────────────────
+# Médico a Domicilio
+# ───────────────────────────────────────────────────
+@con_log_errores
+def rechazar_oferta(oferta_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE solicitudes_ofertas
+        SET estado = 'rechazada', respondido_en = %s
+        WHERE id = %s AND estado = 'pendiente'
+        RETURNING solicitud_id, proveedor_id
+    """, (datetime.now(LIMA_TZ), oferta_id))
+
+    row = cur.fetchone()
+    if not row:
+        conn.rollback()
+        return {'status': 'error', 'mensaje': 'Oferta ya no disponible'}
+
+    solicitud_id, proveedor_id = row
+
+    cur.execute("""
+        UPDATE proveedores_estado SET estado = 'disponible'
+        WHERE proveedor_id = %s AND estado = 'en_oferta'
+    """, (proveedor_id,))
+    conn.commit()
+    cur.close(); conn.close()
+
+    resultado = buscar_y_ofrecer_proveedor(solicitud_id)
+    return {'status': 'rechazada', 'reasignacion': resultado}
+
+@con_log_errores
+def webhook_whatsapp():
+    data = get_json(force=True, silent=True)
+    entry = data.get('entry', [{}])[0]
+    changes = entry.get('changes', [{}])[0]
+    value = changes.get('value', {})
+    mensajes = value.get('messages', [])
+
+    if not mensajes:
+        return (json.dumps({'status': 'ignored'}), 200, HEADERS)
+
+    msg = mensajes[0]
+    telefono = msg.get('from')
+    tipo = msg.get('type')
+
+    if tipo == 'location':
+        loc = msg['location']
+        lat, lng = loc['latitude'], loc['longitude']
+        # recuperar contexto de conversación: qué servicio pidió (MAD/ambulancia)
+        # esto depende de tu máquina de estados conversacional, similar a sofi_agente_estado
+        resultado = crear_solicitud_desde_ubicacion(telefono, lat, lng)
+        return (json.dumps(resultado), 200, HEADERS)
+
+    elif tipo == 'interactive':
+        interactive = msg['interactive']
+        # botones de selección de servicio (MAD / Ambulancia) del cliente
+        procesar_seleccion_servicio(telefono, msg['interactive'])
+        return (json.dumps({'status': 'ok'}), 200, HEADERS)
+
+    elif tipo == 'text':
+        procesar_mensaje_texto(telefono, msg['text']['body'])
+        return (json.dumps({'status': 'ok'}), 200, HEADERS)
+
+    return (json.dumps({'status': 'ignored'}), 200, HEADERS)
+
+def crear_solicitud(telefono, lat, lng, tipo_servicio, destino_clinica_id=None):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO solicitudes (cliente_telefono, tipo_servicio, origen, destino_clinica_id, estado)
+        VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s, 'buscando_proveedor')
+        RETURNING id, tracking_token
+    """, (telefono, tipo_servicio, lng, lat, destino_clinica_id))
+    solicitud_id, tracking_token = cur.fetchone()
+    conn.commit()
+
+    # disparar búsqueda de proveedor (síncrono aquí, o encolar)
+    buscar_y_ofrecer_proveedor(solicitud_id)
+
+    link_tracking = f"https://sntspe.com/track/{tracking_token}"
+    return {'solicitud_id': solicitud_id, 'tracking_url': link_tracking}
+
+def enviar_oferta_wsp(telefono_proveedor, oferta_token, tipo_servicio):
+    numero = _normalizar_celular_pe(telefono_proveedor)
+    if not numero:
+        return
+    nombre_servicio = "Médico a domicilio" if tipo_servicio == "MAD" else "Ambulancia"
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link = f"{base_url}/oferta/{oferta_token}"
+    mensaje = f"Sanitas: Nueva solicitud de {nombre_servicio} cerca de ti. Revisa y responde aqui: {link}"
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "oferta mad")
+
+def enviar_whatsapp_oferta(telefono_proveedor, oferta_id, solicitud_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT tipo_servicio, origen_direccion_texto,
+               ST_Y(origen::geometry) AS lat, ST_X(origen::geometry) AS lng
+        FROM solicitudes WHERE id = %s
+    """, (solicitud_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return
+
+    tipo_servicio, direccion_texto, lat, lng = row
+    nombre_servicio = "Médico a domicilio" if tipo_servicio == "MAD" else "Ambulancia"
+    ubicacion_texto = direccion_texto or f"{lat:.5f}, {lng:.5f}"
+
+    numero = _normalizar_celular_whatsapp_cloud(telefono_proveedor)
+    if not numero:
+        return
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {
+                "text": f"🚨 Nueva solicitud: {nombre_servicio}\n📍 {ubicacion_texto}\n\n¿Aceptas este servicio?"
+            },
+            "footer": {"text": "Sanitas Perú"},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": f"oferta_aceptar_{oferta_id}",  "title": "✅ Aceptar"}},
+                    {"type": "reply", "reply": {"id": f"oferta_rechazar_{oferta_id}", "title": "❌ Rechazar"}},
+                ]
+            }
+        }
+    }
+
+    ok, resultado = _enviar_whatsapp_cloud(payload)
+    if not ok:
+        logging.error(f"[MAD] No se pudo notificar oferta {oferta_id} a {telefono_proveedor}: {resultado}")
+
+def buscar_y_ofrecer_proveedor(solicitud_id, radio_metros=5000):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT origen, tipo_servicio FROM solicitudes WHERE id = %s", (solicitud_id,))
+    origen, tipo_servicio = cur.fetchone()
+
+    cur.execute("""
+        SELECT p.id, p.telefono,
+               ST_Distance(pe.ubicacion, %s::geography) AS distancia
+        FROM proveedores p
+        JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+        WHERE pe.estado = 'disponible'
+          AND p.tipo_servicio IN (%s, 'AMBOS')
+          AND ST_DWithin(pe.ubicacion, %s::geography, %s)
+        ORDER BY distancia ASC
+        LIMIT 1
+        FOR UPDATE OF pe SKIP LOCKED
+    """, (origen, tipo_servicio, origen, radio_metros))
+
+    row = cur.fetchone()
+    if not row:
+        # nadie disponible: expandir radio o marcar sin_cobertura
+        return {'status': 'sin_proveedores', 'radio_usado': radio_metros}
+
+    proveedor_id, telefono_proveedor, distancia = row
+
+    cur.execute("""
+    INSERT INTO solicitudes_ofertas (solicitud_id, proveedor_id, estado)
+    VALUES (%s, %s, 'pendiente') RETURNING id, oferta_token
+    """, (solicitud_id, proveedor_id))
+    oferta_id, oferta_token = cur.fetchone()
+
+    cur.execute("UPDATE proveedores_estado SET estado = 'en_oferta' WHERE proveedor_id = %s", (proveedor_id,))
+    conn.commit()
+
+    enviar_oferta_wsp(telefono_proveedor, oferta_token, tipo_servicio)
+    return {'status': 'ofrecido', 'oferta_id': oferta_id, 'proveedor_id': proveedor_id}
+
+def notificar_cliente_proveedor_asignado(solicitud_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT s.cliente_telefono, s.tipo_servicio, s.tracking_token, p.nombre
+        FROM solicitudes s
+        JOIN proveedores p ON p.id = s.proveedor_id
+        WHERE s.id = %s
+    """, (solicitud_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return
+
+    telefono_cliente, tipo_servicio, tracking_token, nombre_proveedor = row
+    referencia = "tu médico" if tipo_servicio == "MAD" else "tu ambulancia"
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    link_tracking = f"{base_url}/track/{tracking_token}"
+
+    numero = _normalizar_celular_pe(telefono_cliente)
+    if not numero:
+        return
+
+    mensaje = f"Sanitas: {nombre_proveedor} viene en camino, sera {referencia}. Sigue el recorrido: {link_tracking}"
+    enviar_danaconnect(numero, mensaje)
+    sms_aviso(numero, "mad proveedor asignado")
+
+def aceptar_oferta(oferta_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # UPDATE atómico condicionado: solo pasa si sigue 'pendiente'
+    cur.execute("""
+        UPDATE solicitudes_ofertas
+        SET estado = 'aceptada', respondido_en = %s
+        WHERE id = %s AND estado = 'pendiente'
+        RETURNING solicitud_id, proveedor_id
+    """, (datetime.now(LIMA_TZ), oferta_id))
+
+    row = cur.fetchone()
+    if not row:
+        conn.rollback()
+        return {'status': 'error', 'mensaje': 'Oferta ya no disponible'}
+
+    solicitud_id, proveedor_id = row
+
+    cur.execute("""
+        UPDATE solicitudes SET estado = 'asignado', proveedor_id = %s, asignado_en = %s
+        WHERE id = %s
+    """, (proveedor_id, datetime.now(LIMA_TZ), solicitud_id))
+
+    cur.execute("UPDATE proveedores_estado SET estado = 'ocupado' WHERE proveedor_id = %s", (proveedor_id,))
+
+    cur.execute("""
+        INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+        VALUES (%s, 'buscando_proveedor', 'asignado', 'proveedor')
+    """, (solicitud_id,))
+
+    conn.commit()
+
+    notificar_cliente_proveedor_asignado(solicitud_id)
+    return {'status': 'ok', 'solicitud_id': solicitud_id}
+
+@con_log_errores
+def obtener_estado_tracking(tracking_token):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT s.estado, s.tipo_servicio,
+               ST_X(pe.ubicacion::geometry) AS lng, ST_Y(pe.ubicacion::geometry) AS lat,
+               ST_X(s.origen::geometry) AS origen_lng, ST_Y(s.origen::geometry) AS origen_lat,
+               p.nombre AS proveedor_nombre
+        FROM solicitudes s
+        LEFT JOIN proveedores p ON p.id = s.proveedor_id
+        LEFT JOIN proveedores_estado pe ON pe.proveedor_id = s.proveedor_id
+        WHERE s.tracking_token = %s
+    """, (tracking_token,))
+    row = cur.fetchone()
+    if not row:
+        return (json.dumps({'error': 'no encontrado'}), 404, HEADERS)
+
+    estado, tipo, plng, plat, olng, olat, nombre = row
+    return (json.dumps({
+        'estado': estado, 'tipo_servicio': tipo,
+        'proveedor_ubicacion': {'lat': plat, 'lng': plng} if plat else None,
+        'origen': {'lat': olat, 'lng': olng},
+        'proveedor_nombre': nombre
+    }), 200, HEADERS)
+
+def handle_servir_tracking(request, tracking_token):
+    with open("static/track.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+
+@con_log_errores
+def handle_crear_solicitud(request):
+    data = request.get_json(force=True, silent=True) or {}
+    telefono           = data.get("telefono", "")
+    lat                = data.get("lat")
+    lng                = data.get("lng")
+    tipo_servicio      = data.get("tipo_servicio", "")
+    destino_clinica_id = data.get("destino_clinica_id")
+
+    if not telefono or lat is None or lng is None or tipo_servicio not in ("MAD", "AMBULANCIA"):
+        return (json.dumps({
+            "error": "telefono, lat, lng y tipo_servicio (MAD o AMBULANCIA) son obligatorios"
+        }), 400, HEADERS)
+
+    resultado = crear_solicitud(telefono, lat, lng, tipo_servicio, destino_clinica_id)
+    return (json.dumps(resultado, ensure_ascii=False), 200, HEADERS)
+
+
+@con_log_errores
+def handle_buscar_proveedor(request, solicitud_id):
+    try:
+        solicitud_id = int(solicitud_id)
+    except ValueError:
+        return (json.dumps({"error": "solicitud_id inválido"}), 400, HEADERS)
+
+    resultado = buscar_y_ofrecer_proveedor(solicitud_id)
+    return (json.dumps(resultado, ensure_ascii=False), 200, HEADERS)
+
+
+@con_log_errores
+def handle_aceptar_oferta(request, oferta_id):
+    try:
+        oferta_id = int(oferta_id)
+    except ValueError:
+        return (json.dumps({"error": "oferta_id inválido"}), 400, HEADERS)
+
+    resultado = aceptar_oferta(oferta_id)
+    status = 200 if resultado.get("status") == "ok" else 409
+    return (json.dumps(resultado, ensure_ascii=False), status, HEADERS)
+
+
+@con_log_errores
+def handle_actualizar_ubicacion_proveedor(request, proveedor_id):
+    try:
+        proveedor_id = int(proveedor_id)
+    except ValueError:
+        return (json.dumps({"error": "proveedor_id inválido"}), 400, HEADERS)
+
+    data = request.get_json(force=True, silent=True) or {}
+    lat, lng = data.get("lat"), data.get("lng")
+
+    if lat is None or lng is None:
+        return (json.dumps({"error": "lat y lng son obligatorios"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        UPDATE proveedores_estado
+        SET ubicacion = ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
+            actualizado_en = %s
+        WHERE proveedor_id = %s
+    """, (lng, lat, datetime.now(LIMA_TZ), proveedor_id))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return (json.dumps({"status": "ok"}), 200, HEADERS)
+
+
+def notificar_cliente_sin_cobertura(solicitud_id):
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT cliente_telefono, tipo_servicio FROM solicitudes WHERE id = %s", (solicitud_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return
+    telefono, tipo_servicio = row
+    # TODO: reemplazar por tu envío vía Meta Cloud API (WhatsApp Business)
+    # mensaje = "No encontramos un proveedor disponible cerca. Un asesor te contactará."
+    pass
+
+@con_log_errores
+def handle_revisar_timeouts_ofertas(request):
+    conn = get_connection()
+    cur  = conn.cursor()
+
+    limite = datetime.now(LIMA_TZ) - timedelta(seconds=TIMEOUT_OFERTA_SEGUNDOS)
+
+    # Ofertas pendientes que ya vencieron, con su solicitud aún activa
+    cur.execute("""
+        SELECT o.id, o.solicitud_id, o.proveedor_id
+        FROM solicitudes_ofertas o
+        JOIN solicitudes s ON s.id = o.solicitud_id
+        WHERE o.estado = 'pendiente'
+          AND o.ofrecido_en < %s
+          AND s.estado = 'buscando_proveedor'
+        FOR UPDATE OF o SKIP LOCKED
+    """, (limite,))
+    ofertas_vencidas = cur.fetchall()
+
+    if not ofertas_vencidas:
+        cur.close(); conn.close()
+        return (json.dumps({"mensaje": "Sin ofertas vencidas"}), 200, HEADERS)
+
+    reasignadas = []
+    sin_cobertura = []
+
+    for oferta_id, solicitud_id, proveedor_id in ofertas_vencidas:
+        # 1. Expira la oferta
+        cur.execute("""
+            UPDATE solicitudes_ofertas
+            SET estado = 'expirada', respondido_en = %s
+            WHERE id = %s
+        """, (datetime.now(LIMA_TZ), oferta_id))
+
+        # 2. Libera al proveedor (vuelve a estar disponible para otras solicitudes)
+        cur.execute("""
+            UPDATE proveedores_estado
+            SET estado = 'disponible'
+            WHERE proveedor_id = %s AND estado = 'en_oferta'
+        """, (proveedor_id,))
+
+        # 3. Incrementa intentos y expande el radio de esta solicitud
+        cur.execute("""
+            UPDATE solicitudes
+            SET intentos_asignacion = intentos_asignacion + 1,
+                radio_busqueda_metros = LEAST(radio_busqueda_metros + %s, %s)
+            WHERE id = %s
+            RETURNING intentos_asignacion, radio_busqueda_metros
+        """, (INCREMENTO_RADIO_METROS, RADIO_MAXIMO_METROS, solicitud_id))
+        intentos, radio_actual = cur.fetchone()
+
+        cur.execute("""
+            INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+            VALUES (%s, 'buscando_proveedor', 'buscando_proveedor', 'sistema')
+        """, (solicitud_id,))
+
+        conn.commit()
+
+        # 4. Si se agotaron los intentos, se marca sin cobertura y se notifica
+        if intentos >= MAX_INTENTOS_ASIGNACION:
+            cur.execute("""
+                UPDATE solicitudes SET estado = 'sin_cobertura' WHERE id = %s
+            """, (solicitud_id,))
+            conn.commit()
+            notificar_cliente_sin_cobertura(solicitud_id)
+            sin_cobertura.append(solicitud_id)
+        else:
+            resultado = buscar_y_ofrecer_proveedor(solicitud_id, radio_metros=radio_actual)
+            reasignadas.append({"solicitud_id": solicitud_id, "resultado": resultado})
+
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "mensaje": f"{len(ofertas_vencidas)} ofertas vencidas procesadas",
+        "reasignadas": len(reasignadas),
+        "sin_cobertura": sin_cobertura,
+    }, ensure_ascii=False), 200, HEADERS)
+
+@con_log_errores
+def handle_toggle_disponibilidad(request, proveedor_id):
+    data = request.get_json(force=True, silent=True) or {}
+    estado_nuevo = data.get("estado")
+
+    if estado_nuevo not in ("disponible", "desconectado"):
+        return (json.dumps({"error": "estado debe ser 'disponible' o 'desconectado'"}), 400, HEADERS)
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE proveedores_estado SET estado = %s, actualizado_en = %s
+        WHERE proveedor_id = %s AND estado NOT IN ('ocupado', 'en_oferta')
+        RETURNING estado
+    """, (estado_nuevo, datetime.now(LIMA_TZ), proveedor_id))
+    row = cur.fetchone()
+    conn.commit()
+    cur.close(); conn.close()
+
+    if not row:
+        return (json.dumps({
+            "error": "No puedes cambiar tu disponibilidad mientras tienes un servicio activo"
+        }), 409, HEADERS)
+
+    return (json.dumps({"status": "ok", "estado": row[0]}), 200, HEADERS)
+
+
+@con_log_errores
+def handle_estado_actual_proveedor(request, proveedor_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT p.nombre, pe.estado
+        FROM proveedores p
+        JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+        WHERE p.id = %s
+    """, (proveedor_id,))
+    row_proveedor = cur.fetchone()
+    if not row_proveedor:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Proveedor no encontrado"}), 404, HEADERS)
+    nombre, disponibilidad = row_proveedor
+
+    # ── Oferta pendiente ──
+    cur.execute("""
+        SELECT o.id, o.oferta_token, s.tipo_servicio, s.origen_direccion_texto,
+            ST_Distance(pe.ubicacion, s.origen) AS distancia_metros
+        FROM solicitudes_ofertas o
+        JOIN solicitudes s ON s.id = o.solicitud_id
+        JOIN proveedores_estado pe ON pe.proveedor_id = o.proveedor_id
+        WHERE o.proveedor_id = %s AND o.estado = 'pendiente'
+        ORDER BY o.ofrecido_en DESC LIMIT 1
+    """, (proveedor_id,))
+    row_oferta = cur.fetchone()
+    oferta_pendiente = None
+    if row_oferta:
+        oferta_id, oferta_token, tipo_servicio, direccion, distancia = row_oferta
+        oferta_pendiente = {
+            "oferta_id": oferta_id,
+            "oferta_token": str(oferta_token),
+            "tipo_servicio": tipo_servicio,
+            "direccion": direccion,
+            "distancia_metros": float(distancia) if distancia is not None else None,
+        }
+
+    # ── Servicio activo ──
+    cur.execute("""
+        SELECT id, tipo_servicio, estado, cliente_telefono, cliente_nombre,
+               origen_direccion_texto,
+               ST_Y(origen::geometry) AS lat, ST_X(origen::geometry) AS lng
+        FROM solicitudes
+        WHERE proveedor_id = %s AND estado IN ('asignado', 'en_camino', 'llego', 'en_atencion')
+        ORDER BY asignado_en DESC LIMIT 1
+    """, (proveedor_id,))
+    row_servicio = cur.fetchone()
+    servicio_activo = None
+    if row_servicio:
+        sol_id, tipo_servicio, estado, tel, nombre_cliente, direccion, lat, lng = row_servicio
+        servicio_activo = {
+            "solicitud_id": sol_id,
+            "tipo_servicio": tipo_servicio,
+            "estado": estado,
+            "cliente_telefono": tel,
+            "cliente_nombre": nombre_cliente,
+            "direccion": direccion,
+            "origen_lat": lat,
+            "origen_lng": lng,
+        }
+
+    cur.close(); conn.close()
+
+    return (json.dumps({
+        "nombre": nombre,
+        "disponibilidad": disponibilidad,
+        "oferta_pendiente": oferta_pendiente,
+        "servicio_activo": servicio_activo,
+    }, ensure_ascii=False), 200, HEADERS)
+
+def handle_rechazar_oferta(request, oferta_id):
+    try:
+        oferta_id = int(oferta_id)
+    except ValueError:
+        return (json.dumps({"error": "oferta_id inválido"}), 400, HEADERS)
+
+    resultado = rechazar_oferta(oferta_id)
+    status = 200 if resultado.get("status") == "rechazada" else 409
+    return (json.dumps(resultado, ensure_ascii=False), status, HEADERS)
+
+
+@con_log_errores
+def handle_actualizar_estado_solicitud(request, solicitud_id):
+    try:
+        solicitud_id = int(solicitud_id)
+    except ValueError:
+        return (json.dumps({"error": "solicitud_id inválido"}), 400, HEADERS)
+
+    data = request.get_json(force=True, silent=True) or {}
+    estado_nuevo = data.get("estado")
+    proveedor_id = data.get("proveedor_id")
+
+    TRANSICIONES_VALIDAS = {
+        "asignado": "en_camino",
+        "en_camino": "llego",
+        "llego": "en_atencion",
+        "en_atencion": "finalizado",
+    }
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT estado, proveedor_id FROM solicitudes WHERE id = %s", (solicitud_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Solicitud no encontrada"}), 404, HEADERS)
+
+    estado_actual, proveedor_asignado = row
+
+    if str(proveedor_asignado) != str(proveedor_id):
+        cur.close(); conn.close()
+        return (json.dumps({"error": "Este servicio no está asignado a este proveedor"}), 403, HEADERS)
+
+    if TRANSICIONES_VALIDAS.get(estado_actual) != estado_nuevo:
+        cur.close(); conn.close()
+        return (json.dumps({
+            "error": f"Transición inválida: {estado_actual} → {estado_nuevo}"
+        }), 409, HEADERS)
+
+    campos_extra = ""
+    valores_extra = []
+    if estado_nuevo == "finalizado":
+        campos_extra = ", finalizado_en = %s"
+        valores_extra = [datetime.now(LIMA_TZ)]
+
+    cur.execute(f"""
+        UPDATE solicitudes SET estado = %s{campos_extra} WHERE id = %s
+    """, (estado_nuevo, *valores_extra, solicitud_id))
+
+    cur.execute("""
+        INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+        VALUES (%s, %s, %s, 'proveedor')
+    """, (solicitud_id, estado_actual, estado_nuevo))
+
+    if estado_nuevo == "finalizado":
+        cur.execute("""
+            UPDATE proveedores_estado SET estado = 'disponible' WHERE proveedor_id = %s
+        """, (proveedor_asignado,))
+
+    conn.commit()
+    cur.close(); conn.close()
+
+    if estado_nuevo == "en_camino":
+        notificar_cliente_proveedor_en_camino(solicitud_id)
+
+    return (json.dumps({"status": "ok", "estado": estado_nuevo}), 200, HEADERS)
+
+def notificar_cliente_proveedor_en_camino(solicitud_id):
+    # TODO: mensaje breve por WhatsApp Cloud API — opcional, el cliente ya ve
+    # el cambio de estado reflejado en /track/<token>
+    pass
+
+def handle_servir_proveedor(request):
+    with open("static/proveedor.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+def _obtener_oferta_por_token(cur, token):
+    cur.execute("""
+        SELECT o.id, o.estado, s.tipo_servicio, s.origen_direccion_texto,
+               ST_Y(s.origen::geometry) AS lat, ST_X(s.origen::geometry) AS lng,
+               ST_Distance(pe.ubicacion, s.origen) AS distancia_metros
+        FROM solicitudes_ofertas o
+        JOIN solicitudes s ON s.id = o.solicitud_id
+        JOIN proveedores_estado pe ON pe.proveedor_id = o.proveedor_id
+        WHERE o.oferta_token = %s
+    """, (token,))
+    return cur.fetchone()
+
+
+@con_log_errores
+def handle_estado_oferta_token(request, token):
+    conn = get_connection(); cur = conn.cursor()
+    row = _obtener_oferta_por_token(cur, token)
+    cur.close(); conn.close()
+
+    if not row:
+        return (json.dumps({"error": "Oferta no encontrada"}), 404, HEADERS)
+
+    oferta_id, estado, tipo_servicio, direccion, lat, lng, distancia = row
+    return (json.dumps({
+        "estado": estado,
+        "tipo_servicio": tipo_servicio,
+        "direccion": direccion,
+        "lat": lat, "lng": lng,
+        "distancia_metros": float(distancia) if distancia is not None else None,
+    }, ensure_ascii=False), 200, HEADERS)
+
+
+@con_log_errores
+def handle_aceptar_oferta_token(request, token):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT id FROM solicitudes_ofertas WHERE oferta_token = %s", (token,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return (json.dumps({"error": "Oferta no encontrada"}), 404, HEADERS)
+
+    resultado = aceptar_oferta(row[0])
+    status = 200 if resultado.get("status") == "ok" else 409
+    return (json.dumps(resultado, ensure_ascii=False), status, HEADERS)
+
+
+@con_log_errores
+def handle_rechazar_oferta_token(request, token):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT id FROM solicitudes_ofertas WHERE oferta_token = %s", (token,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if not row:
+        return (json.dumps({"error": "Oferta no encontrada"}), 404, HEADERS)
+
+    resultado = rechazar_oferta(row[0])
+    status = 200 if resultado.get("status") == "rechazada" else 409
+    return (json.dumps(resultado, ensure_ascii=False), status, HEADERS)
+
+
+def handle_servir_oferta(request, token):
+    with open("static/oferta.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8"})
+
+# ============================================================
+# Utilidades de password (pbkdf2, sin dependencias externas)
+# ============================================================
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
+    return f"{salt}${dk.hex()}"
+
+
+def check_password(password: str, password_hash: str) -> bool:
+    try:
+        salt, hashed = password_hash.split("$")
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
+        return hmac.compare_digest(dk.hex(), hashed)
+    except Exception:
+        return False
+
+
+def generar_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+# ============================================================
+# AUTENTICACION - validacion de token y decoradores
+# ============================================================
+def obtener_sesion_activa(request):
+    """Lee el header 'Authorization: Bearer <token>' y devuelve el asesor
+    autenticado (dict) o None si el token no existe/expiro/el asesor esta INACTIVO."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:].strip()
+    if not token:
+        return None
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT a.id, a.nombre_completo, a.usuario, a.rol, a.estado
+           FROM bo_sesiones s
+           JOIN bo_asesores a ON a.id = s.asesor_id
+           WHERE s.token = %s AND s.fecha_logout IS NULL""",
+        (token,),
+    )
+    row = cur.fetchone()
+    cur.close(); conn.close()
+
+    if not row or row[4] != "ACTIVO":
+        return None
+    return {"id": row[0], "nombre": row[1], "usuario": row[2], "rol": row[3]}
+
+
+def require_auth(handler):
+    """Exige un token de sesion valido (cualquier rol). Inyecta request.asesor_actual."""
+    @functools.wraps(handler)
+    def wrapper(request, *args, **kwargs):
+        asesor = obtener_sesion_activa(request)
+        if not asesor:
+            return json.dumps({"ok": False, "error": "No autenticado"}), 401, HEADERS
+        request.asesor_actual = asesor
+        return handler(request, *args, **kwargs)
+    return wrapper
+
+
+def require_admin(handler):
+    """Exige un token de sesion valido con rol ADMIN. Inyecta request.asesor_actual."""
+    @functools.wraps(handler)
+    def wrapper(request, *args, **kwargs):
+        asesor = obtener_sesion_activa(request)
+        if not asesor:
+            return json.dumps({"ok": False, "error": "No autenticado"}), 401, HEADERS
+        if asesor["rol"] != "ADMIN":
+            return json.dumps({"ok": False, "error": "Requiere rol ADMIN"}), 403, HEADERS
+        request.asesor_actual = asesor
+        return handler(request, *args, **kwargs)
+    return wrapper
+@con_log_errores
+def bo_login(request):
+    body = request.get_json(silent=True) or {}
+    usuario = (body.get("usuario") or "").strip()
+    password = body.get("password") or ""
+
+    if not usuario or not password:
+        return json.dumps({"ok": False, "error": "usuario y password requeridos"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, nombre_completo, usuario, password_hash, rol, estado
+           FROM bo_asesores WHERE usuario = %s""",
+        (usuario,),
+    )
+    row = cur.fetchone()
+
+    if not row or row[5] != "ACTIVO" or not check_password(password, row[3]):
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "credenciales invalidas"}), 401, HEADERS
+
+    asesor_id = row[0]
+    token = generar_token()
+    # Registrar inicio de sesion (para productividad), guardar el token y marcar CONECTADO
+    cur.execute(
+        """INSERT INTO bo_sesiones (asesor_id, token, fecha_login)
+           VALUES (%s, %s, now() AT TIME ZONE 'America/Lima') RETURNING id""",
+        (asesor_id, token),
+    )
+    sesion_id = cur.fetchone()[0]
+    cur.execute(
+        """UPDATE bo_asesores SET estado_conexion = 'CONECTADO',
+           ultima_conexion = now() AT TIME ZONE 'America/Lima' WHERE id = %s""",
+        (asesor_id,),
+    )
+    conn.commit()
+    cur.close(); conn.close()
+
+    return json.dumps({
+        "ok": True,
+        "asesor": {"id": asesor_id, "nombre": row[1], "usuario": row[2], "rol": row[4]},
+        "sesion_id": sesion_id,
+        "token": token,
+    }), 200, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_logout(request):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip()  # ya paso require_auth, sabemos que empieza con "Bearer "
+    asesor_id = request.asesor_actual["id"]
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE bo_sesiones SET fecha_logout = now() AT TIME ZONE 'America/Lima',
+           duracion_segundos = EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'America/Lima') - fecha_login))::int
+           WHERE token = %s""",
+        (token,),
+    )
+    cur.execute(
+        "UPDATE bo_asesores SET estado_conexion = 'DESCONECTADO' WHERE id = %s",
+        (asesor_id,),
+    )
+    conn.commit()
+    cur.close(); conn.close()
+    return json.dumps({"ok": True}), 200, HEADERS
+
+
+# ============================================================
+# RECUPERACION DE CLAVE (autoservicio, codigo por SMS)
+# ============================================================
+def generar_codigo_otp() -> str:
+    return f"{random.randint(0, 999999):06d}"
+
+
+def enviar_sms_reset_password(celular, codigo):
+    """Envio DIRECTO a Danaconnect (mismo patron que envia_sms_lead_pases),
+    no pasa por la cola/batch -- necesitamos que el codigo llegue al toque.
+    Requiere que DANACONNECT_URL, DANACONNECT_AUTH y requests ya esten
+    disponibles en el scope de main.py (ya lo estan, porque los usa
+    envia_sms_lead_pases)."""
+    mensaje = f"Codigo Sanitas"
+    payload = {
+        "NUM": f" {celular}",
+        "TEXT": mensaje,
+        "URL": ""
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": DANACONNECT_AUTH
+    }
+    try:
+        response = requests.post(DANACONNECT_URL, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error al enviar SMS de reset a {celular}: {e}")
+        return False
+
+    # Bitacora (igual que en el resto del sistema) -- esto NO envia nada, solo registra
+    sms_aviso(celular, mensaje)
+    return True
+
+
+@con_log_errores
+def bo_solicitar_reset(request):
+    """Paso 1: el asesor pide un codigo. Se envia por SMS al celular registrado."""
+    body = request.get_json(silent=True) or {}
+    usuario = (body.get("usuario") or "").strip()
+    if not usuario:
+        return json.dumps({"ok": False, "error": "usuario requerido"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, celular, estado FROM bo_asesores WHERE usuario = %s", (usuario,))
+    row = cur.fetchone()
+
+    # Respuesta generica siempre (exista o no el usuario), para no filtrar informacion
+    respuesta_generica = (
+        json.dumps({"ok": True, "mensaje": "Si el usuario existe y tiene celular registrado, se envio un codigo por SMS"}),
+        200, HEADERS,
+    )
+
+    if not row or row[2] != "ACTIVO" or not row[1]:
+        cur.close(); conn.close()
+        return respuesta_generica
+
+    asesor_id, celular, _ = row
+    codigo = generar_codigo_otp()
+    cur.execute(
+        """INSERT INTO bo_reset_password (asesor_id, codigo, fecha_expira)
+           VALUES (%s, %s, (now() AT TIME ZONE 'America/Lima') + interval '15 minutes')""",
+        (asesor_id, codigo),
+    )
+    conn.commit()
+    cur.close(); conn.close()
+
+    # sofi_sms_avisos.descripcion es varchar(30) -- mensaje corto obligatorio, ya lo maneja
+    # enviar_sms_reset_password() (envio directo a Danaconnect + registro en bitacora)
+    enviar_sms_reset_password(celular, codigo)
+
+    return respuesta_generica
+
+
+@con_log_errores
+def bo_confirmar_reset(request):
+    """Paso 2: el asesor manda usuario + codigo + nueva clave."""
+    body = request.get_json(silent=True) or {}
+    usuario = (body.get("usuario") or "").strip()
+    codigo = (body.get("codigo") or "").strip()
+    nueva_password = body.get("nueva_password") or ""
+
+    if not usuario or not codigo or not nueva_password:
+        return json.dumps({"ok": False, "error": "usuario, codigo y nueva_password son requeridos"}), 400, HEADERS
+    if len(nueva_password) < 6:
+        return json.dumps({"ok": False, "error": "la clave debe tener al menos 6 caracteres"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bo_asesores WHERE usuario = %s AND estado = 'ACTIVO'", (usuario,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "codigo invalido o expirado"}), 400, HEADERS
+    asesor_id = row[0]
+
+    cur.execute(
+        """SELECT id FROM bo_reset_password
+           WHERE asesor_id = %s AND codigo = %s AND usado = FALSE
+             AND fecha_expira > (now() AT TIME ZONE 'America/Lima')
+           ORDER BY fecha_creacion DESC LIMIT 1""",
+        (asesor_id, codigo),
+    )
+    reset_row = cur.fetchone()
+    if not reset_row:
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "codigo invalido o expirado"}), 400, HEADERS
+
+    cur.execute("UPDATE bo_asesores SET password_hash = %s WHERE id = %s", (hash_password(nueva_password), asesor_id))
+    cur.execute("UPDATE bo_reset_password SET usado = TRUE WHERE id = %s", (reset_row[0],))
+    # Por seguridad, cerrar cualquier sesion activa de ese asesor al cambiar la clave
+    cur.execute(
+        """UPDATE bo_sesiones SET fecha_logout = now() AT TIME ZONE 'America/Lima'
+           WHERE asesor_id = %s AND fecha_logout IS NULL""",
+        (asesor_id,),
+    )
+    cur.execute("UPDATE bo_asesores SET estado_conexion = 'DESCONECTADO' WHERE id = %s", (asesor_id,))
+    conn.commit()
+    cur.close(); conn.close()
+
+    return json.dumps({"ok": True}), 200, HEADERS
+
+
+# ============================================================
+# TAREAS
+# ============================================================
+@con_log_errores
+@require_auth
+def bo_crear_tarea(request):
+    """Primera tarea: INSERT de una nueva tarea en bo_tareas."""
+    body = request.get_json(silent=True) or {}
+
+    cliente_nombre = (body.get("cliente_nombre") or "").strip()
+    descripcion = (body.get("descripcion") or "").strip()
+    if not cliente_nombre or not descripcion:
+        return json.dumps({"ok": False, "error": "cliente_nombre y descripcion son requeridos"}), 400, HEADERS
+
+    cliente_dni = body.get("cliente_dni")
+    cliente_celular = body.get("cliente_celular")
+    cliente_correo = body.get("cliente_correo")
+    asesor_id = body.get("asesor_id")  # opcional, puede crearse sin asignar
+    estado_inicial = "ASIGNADO" if asesor_id else "NUEVO"
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO bo_tareas
+           (asesor_id, estado, cliente_nombre, cliente_dni, cliente_celular, cliente_correo, descripcion)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)
+           RETURNING id, fecha_creacion""",
+        (asesor_id, estado_inicial, cliente_nombre, cliente_dni, cliente_celular, cliente_correo, descripcion),
+    )
+    tarea_id, fecha_creacion = cur.fetchone()
+
+    cur.execute(
+        """INSERT INTO bo_tarea_eventos (tarea_id, asesor_id, tipo, estado_nuevo)
+           VALUES (%s, %s, 'CREACION', %s)""",
+        (tarea_id, asesor_id, estado_inicial),
+    )
+    conn.commit()
+    cur.close(); conn.close()
+
+    return json.dumps({"ok": True, "id": tarea_id, "estado": estado_inicial}), 201, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_listar_tareas(request):
+    """Listado para el tablero. Filtros opcionales: estado, asesor_id."""
+    estado = request.args.get("estado")
+    asesor_id = request.args.get("asesor_id")
+
+    query = """SELECT t.id, t.estado, t.cliente_nombre, t.cliente_dni, t.cliente_celular,
+                      t.cliente_correo, t.descripcion, t.fecha_creacion, t.fecha_actualizacion,
+                      t.asesor_id, a.nombre_completo
+               FROM bo_tareas t
+               LEFT JOIN bo_asesores a ON a.id = t.asesor_id
+               WHERE 1=1"""
+    params = []
+    if estado:
+        query += " AND t.estado = %s"
+        params.append(estado)
+    if asesor_id:
+        query += " AND t.asesor_id = %s"
+        params.append(asesor_id)
+    query += " ORDER BY t.fecha_creacion DESC"
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    tareas = [{
+        "id": r[0], "estado": r[1], "cliente_nombre": r[2], "cliente_dni": r[3],
+        "cliente_celular": r[4], "cliente_correo": r[5], "descripcion": r[6],
+        "fecha_creacion": r[7].isoformat() if r[7] else None,
+        "fecha_actualizacion": r[8].isoformat() if r[8] else None,
+        "asesor_id": r[9], "asesor_nombre": r[10],
+    } for r in rows]
+
+    return json.dumps({"ok": True, "tareas": tareas}), 200, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_detalle_tarea(request, tarea_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT t.id, t.estado, t.cliente_nombre, t.cliente_dni, t.cliente_celular,
+                  t.cliente_correo, t.descripcion, t.fecha_creacion, t.fecha_actualizacion,
+                  t.asesor_id, a.nombre_completo
+           FROM bo_tareas t LEFT JOIN bo_asesores a ON a.id = t.asesor_id
+           WHERE t.id = %s""",
+        (tarea_id,),
+    )
+    r = cur.fetchone()
+    if not r:
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "tarea no encontrada"}), 404, HEADERS
+
+    cur.execute(
+        """SELECT e.id, e.tipo, e.comentario, e.estado_anterior, e.estado_nuevo, e.fecha, a.nombre_completo
+           FROM bo_tarea_eventos e LEFT JOIN bo_asesores a ON a.id = e.asesor_id
+           WHERE e.tarea_id = %s ORDER BY e.fecha DESC""",
+        (tarea_id,),
+    )
+    eventos = [{
+        "id": e[0], "tipo": e[1], "comentario": e[2], "estado_anterior": e[3],
+        "estado_nuevo": e[4], "fecha": e[5].isoformat() if e[5] else None, "asesor_nombre": e[6],
+    } for e in cur.fetchall()]
+    cur.close(); conn.close()
+
+    tarea = {
+        "id": r[0], "estado": r[1], "cliente_nombre": r[2], "cliente_dni": r[3],
+        "cliente_celular": r[4], "cliente_correo": r[5], "descripcion": r[6],
+        "fecha_creacion": r[7].isoformat() if r[7] else None,
+        "fecha_actualizacion": r[8].isoformat() if r[8] else None,
+        "asesor_id": r[9], "asesor_nombre": r[10], "eventos": eventos,
+    }
+    return json.dumps({"ok": True, "tarea": tarea}), 200, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_actualizar_tarea(request, tarea_id):
+    """Usado por el drag&drop (cambio de columna/estado) y por reasignacion."""
+    body = request.get_json(silent=True) or {}
+    nuevo_estado = body.get("estado")
+    nuevo_asesor_id = body.get("asesor_id")  # a quien se reasigna (puede ser otro asesor)
+    asesor_que_actualiza = request.asesor_actual["id"]  # quien hace el cambio: del token, no del body
+
+    if nuevo_estado and nuevo_estado not in ESTADOS_VALIDOS:
+        return json.dumps({"ok": False, "error": f"estado invalido, use uno de {sorted(ESTADOS_VALIDOS)}"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT estado, asesor_id FROM bo_tareas WHERE id = %s", (tarea_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "tarea no encontrada"}), 404, HEADERS
+    estado_anterior, asesor_anterior = row
+
+    campos, valores = [], []
+    if nuevo_estado and nuevo_estado != estado_anterior:
+        campos.append("estado = %s"); valores.append(nuevo_estado)
+    if nuevo_asesor_id is not None and nuevo_asesor_id != asesor_anterior:
+        campos.append("asesor_id = %s"); valores.append(nuevo_asesor_id)
+
+    if campos:
+        campos.append("fecha_actualizacion = now() AT TIME ZONE 'America/Lima'")
+        valores.append(tarea_id)
+        cur.execute(f"UPDATE bo_tareas SET {', '.join(campos)} WHERE id = %s", tuple(valores))
+
+        if nuevo_estado and nuevo_estado != estado_anterior:
+            cur.execute(
+                """INSERT INTO bo_tarea_eventos (tarea_id, asesor_id, tipo, estado_anterior, estado_nuevo)
+                   VALUES (%s, %s, 'CAMBIO_ESTADO', %s, %s)""",
+                (tarea_id, asesor_que_actualiza, estado_anterior, nuevo_estado),
+            )
+        if nuevo_asesor_id is not None and nuevo_asesor_id != asesor_anterior:
+            cur.execute(
+                """INSERT INTO bo_tarea_eventos (tarea_id, asesor_id, tipo, comentario)
+                   VALUES (%s, %s, 'ASIGNACION', %s)""",
+                (tarea_id, asesor_que_actualiza, f"Reasignada a asesor_id={nuevo_asesor_id}"),
+            )
+        conn.commit()
+
+    cur.close(); conn.close()
+    return json.dumps({"ok": True}), 200, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_agregar_comentario(request, tarea_id):
+    body = request.get_json(silent=True) or {}
+    comentario = (body.get("comentario") or "").strip()
+    asesor_id = request.asesor_actual["id"]  # quien comenta: del token, no del body
+    if not comentario:
+        return json.dumps({"ok": False, "error": "comentario requerido"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO bo_tarea_eventos (tarea_id, asesor_id, tipo, comentario)
+           VALUES (%s, %s, 'COMENTARIO', %s)""",
+        (tarea_id, asesor_id, comentario),
+    )
+    cur.execute(
+        "UPDATE bo_tareas SET fecha_actualizacion = now() AT TIME ZONE 'America/Lima' WHERE id = %s",
+        (tarea_id,),
+    )
+    conn.commit()
+    cur.close(); conn.close()
+    return json.dumps({"ok": True}), 201, HEADERS
+
+
+# ============================================================
+# ASESORES (mantenimiento)
+# ============================================================
+@con_log_errores
+def bo_crear_asesor(request):
+    """Protegido para rol ADMIN, con una excepcion: si bo_asesores esta vacia
+    (primer arranque del sistema), se permite crear el primer admin sin token."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM bo_asesores")
+    hay_asesores = cur.fetchone()[0] > 0
+    cur.close(); conn.close()
+
+    if hay_asesores:
+        asesor_actual = obtener_sesion_activa(request)
+        if not asesor_actual:
+            return json.dumps({"ok": False, "error": "No autenticado"}), 401, HEADERS
+        if asesor_actual["rol"] != "ADMIN":
+            return json.dumps({"ok": False, "error": "Requiere rol ADMIN"}), 403, HEADERS
+
+    body = request.get_json(silent=True) or {}
+    nombre = (body.get("nombre_completo") or "").strip()
+    usuario = (body.get("usuario") or "").strip()
+    password = body.get("password") or ""
+    correo = body.get("correo")
+    celular = body.get("celular")
+    rol = body.get("rol", "ASESOR") if hay_asesores else "ADMIN"  # el primer usuario siempre es ADMIN
+
+    if not nombre or not usuario or not password:
+        return json.dumps({"ok": False, "error": "nombre_completo, usuario y password son requeridos"}), 400, HEADERS
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO bo_asesores (nombre_completo, usuario, password_hash, correo, celular, rol)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+            (nombre, usuario, hash_password(password), correo, celular, rol),
+        )
+        asesor_id = cur.fetchone()[0]
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        cur.close(); conn.close()
+        return json.dumps({"ok": False, "error": "usuario ya existe"}), 409, HEADERS
+    cur.close(); conn.close()
+    return json.dumps({"ok": True, "id": asesor_id}), 201, HEADERS
+
+
+@con_log_errores
+@require_admin
+def bo_listar_asesores(request):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT a.id, a.nombre_completo, a.usuario, a.correo, a.celular, a.rol, a.estado,
+                  a.estado_conexion, a.ultima_conexion,
+                  (SELECT COUNT(*) FROM bo_tareas t WHERE t.asesor_id = a.id AND t.estado = 'CERRADO') AS tareas_resueltas
+           FROM bo_asesores a ORDER BY a.nombre_completo ASC"""
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    asesores = [{
+        "id": r[0], "nombre_completo": r[1], "usuario": r[2], "correo": r[3], "celular": r[4],
+        "rol": r[5], "estado": r[6], "estado_conexion": r[7],
+        "ultima_conexion": r[8].isoformat() if r[8] else None, "tareas_resueltas": r[9],
+    } for r in rows]
+    return json.dumps({"ok": True, "asesores": asesores}), 200, HEADERS
+
+
+@con_log_errores
+@require_admin
+def bo_actualizar_asesor(request, asesor_id):
+    """Editar datos, o dar de baja (estado=INACTIVO)."""
+    body = request.get_json(silent=True) or {}
+    campos, valores = [], []
+
+    for campo in ["nombre_completo", "correo", "celular", "rol"]:
+        if campo in body:
+            campos.append(f"{campo} = %s"); valores.append(body[campo])
+
+    if "password" in body and body["password"]:
+        campos.append("password_hash = %s"); valores.append(hash_password(body["password"]))
+
+    if "estado" in body:
+        campos.append("estado = %s"); valores.append(body["estado"])
+        if body["estado"] == "INACTIVO":
+            campos.append("fecha_baja = now() AT TIME ZONE 'America/Lima'")
+        elif body["estado"] == "ACTIVO":
+            campos.append("fecha_baja = NULL")
+
+    if not campos:
+        return json.dumps({"ok": False, "error": "nada para actualizar"}), 400, HEADERS
+
+    valores.append(asesor_id)
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(f"UPDATE bo_asesores SET {', '.join(campos)} WHERE id = %s", tuple(valores))
+    conn.commit()
+    cur.close(); conn.close()
+    return json.dumps({"ok": True}), 200, HEADERS
+
+
+@con_log_errores
+@require_auth
+def bo_productividad_asesor(request, asesor_id):
+    """Tiempo de conexion acumulado + tareas realizadas, filtrable por fecha (?desde=&hasta=).
+    Un asesor puede ver su propia productividad; para ver la de otros se requiere ADMIN."""
+    if request.asesor_actual["id"] != int(asesor_id) and request.asesor_actual["rol"] != "ADMIN":
+        return json.dumps({"ok": False, "error": "No autorizado"}), 403, HEADERS
+
+    desde = request.args.get("desde")  # YYYY-MM-DD
+    hasta = request.args.get("hasta")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    query_sesiones = """SELECT COALESCE(SUM(duracion_segundos), 0),
+                                COALESCE(SUM(CASE WHEN fecha_logout IS NULL
+                                    THEN EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'America/Lima') - fecha_login))::int
+                                    ELSE 0 END), 0)
+                         FROM bo_sesiones WHERE asesor_id = %s"""
+    params = [asesor_id]
+    if desde:
+        query_sesiones += " AND fecha_login >= %s"; params.append(desde)
+    if hasta:
+        query_sesiones += " AND fecha_login <= %s"; params.append(hasta)
+    cur.execute(query_sesiones, tuple(params))
+    seg_cerradas, seg_abierta = cur.fetchone()
+
+    query_tareas = """SELECT estado, COUNT(*) FROM bo_tareas WHERE asesor_id = %s"""
+    params2 = [asesor_id]
+    if desde:
+        query_tareas += " AND fecha_creacion >= %s"; params2.append(desde)
+    if hasta:
+        query_tareas += " AND fecha_creacion <= %s"; params2.append(hasta)
+    query_tareas += " GROUP BY estado"
+    cur.execute(query_tareas, tuple(params2))
+    tareas_por_estado = {r[0]: r[1] for r in cur.fetchall()}
+
+    cur.close(); conn.close()
+
+    total_segundos = seg_cerradas + seg_abierta
+    return json.dumps({
+        "ok": True,
+        "asesor_id": asesor_id,
+        "tiempo_conectado_segundos": total_segundos,
+        "tiempo_conectado_horas": round(total_segundos / 3600, 2),
+        "tareas_por_estado": tareas_por_estado,
+        "total_tareas": sum(tareas_por_estado.values()),
+    }), 200, HEADERS
+
+IMAGEN_OG_PROGRAMAS_SALUD = os.environ.get("IMAGEN_OG_PROGRAMAS_SALUD")
+
+@con_log_errores
+def handle_redirect_programa_salud(code, request):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT whatsapp_destino FROM programa_salud_links WHERE code = %s
+            """, (code,))
+            row = cur.fetchone()
+            if not row:
+                return "Enlace no encontrado", 404
+            whatsapp_destino = row[0]
+
+            cur.execute("""
+                UPDATE programa_salud_links SET
+                    raw_hits = raw_hits + 1,
+                    ip_address = %s,
+                    user_agent = %s,
+                    entregado = TRUE,
+                    entregado_at = COALESCE(entregado_at, NOW())
+                WHERE code = %s
+            """, (request.remote_addr, request.headers.get("User-Agent", ""), code))
+            conn.commit()
+    finally:
+        conn.close()
+
+    base_url = os.environ.get("BASE_URL", "https://sntspe.com")
+    url_canonica = f"{base_url}/ps/{code}"
+
+    texto_wa = quote("Quiero inscribirme a programas")
+    url_destino = f"https://wa.me/{whatsapp_destino}?text={texto_wa}"
+
+    if IMAGEN_OG_PROGRAMAS_SALUD:
+        img_url_meta = f"{IMAGEN_OG_PROGRAMAS_SALUD}?v={int(time.time())}"
+        imagen_meta = f"""<meta property="og:image" content="{img_url_meta}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:image" content="{img_url_meta}">"""
+    else:
+        imagen_meta = ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{url_canonica}">
+  <meta property="og:site_name" content="Sanitas Perú">
+  <meta property="og:title" content="Programas de Salud Sanitas">
+  <meta property="og:description" content="Te acompañamos en el cuidado de tu salud">
+  {imagen_meta}
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Programas de Salud Sanitas</title>
+</head>
+<body>
+  <script>
+    if (navigator.sendBeacon) {{
+      navigator.sendBeacon("/ps/confirm/{code}");
+    }} else {{
+      fetch("/ps/confirm/{code}", {{ method: "POST", keepalive: true }});
+    }}
+    window.location.href = "{url_destino}";
+  </script>
+  <p>Redirigiendo a WhatsApp... <a href="{url_destino}">Haz clic aquí si no eres redirigido.</a></p>
+</body>
+</html>"""
+    return html, 200
+
+
+@con_log_errores
+def handle_confirmar_click_programa_salud(code, request):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM programa_salud_links WHERE code = %s", (code,))
+            if not cur.fetchone():
+                return "", 204
+
+            cur.execute("""
+                UPDATE programa_salud_links SET
+                    clicked_at = COALESCE(clicked_at, NOW()),
+                    click_count = click_count + 1
+                WHERE code = %s
+            """, (code,))
+            conn.commit()
+    finally:
+        conn.close()
+
+    return "", 204

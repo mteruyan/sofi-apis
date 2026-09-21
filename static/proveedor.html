@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Panel de Proveedor — Sanitas</title>
+<meta name="robots" content="noindex, nofollow">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+  :root{
+    --azul:        #003876;
+    --azul-claro:  #0057b8;
+    --teal:        #00A9B7;
+    --teal-dark:   #007A87;
+    --gris:        #f4f6f9;
+    --borde:       #d7dde5;
+    --rojo:        #c0392b;
+    --verde:       #1e8e3e;
+    --texto:       #1f2937;
+    --texto-mute:  #6b7a82;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--gris); }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    color:var(--texto);
+    min-height:100vh;
+    min-height:100dvh;
+  }
+
+  .shell{ max-width:480px; margin:0 auto; min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
+
+  /* ---------- pantalla de acceso ---------- */
+  #pantallaAcceso{
+    flex:1; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .login-card{
+    background:#fff; border-radius:14px; padding:28px 24px; width:100%;
+    box-shadow:0 2px 14px rgba(0,56,118,.1); text-align:center;
+  }
+  .login-card .logo-mark{
+    width:52px; height:52px; border-radius:14px; margin:0 auto 14px;
+    background:linear-gradient(135deg,var(--azul),var(--teal-dark));
+    display:flex; align-items:center; justify-content:center; color:#fff;
+    font-weight:700; font-size:20px;
+  }
+  .login-card h1{ font-size:18px; margin:0 0 4px; color:var(--azul); }
+  .login-card p{ font-size:13px; color:var(--texto-mute); margin:0 0 18px; }
+  .login-card input{
+    width:100%; padding:12px 14px; border:1px solid var(--borde); border-radius:8px;
+    font-size:16px; margin-bottom:12px; text-align:center; letter-spacing:.5px;
+  }
+  .login-card button{
+    width:100%; padding:13px; background:var(--azul-claro); color:#fff; border:none;
+    border-radius:8px; font-size:15px; font-weight:700; cursor:pointer;
+  }
+  .login-error{ color:var(--rojo); font-size:12px; margin-top:10px; min-height:16px; }
+
+  /* ---------- header ---------- */
+  header{
+    background:var(--azul); color:#fff; padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  }
+  header .quien{ line-height:1.2; }
+  header .quien .nombre{ font-weight:600; font-size:14.5px; }
+  header .quien .rol{ font-size:11px; opacity:.75; text-transform:uppercase; letter-spacing:.04em; }
+
+  .switch-disp{ display:flex; align-items:center; gap:8px; }
+  .switch-disp .etiqueta{ font-size:11.5px; font-weight:600; }
+  .switch-disp .etiqueta.on{ color:#8ce8c0; }
+  .switch-disp .etiqueta.off{ color:#ffb4a8; }
+  .toggle{
+    width:46px; height:26px; border-radius:100px; background:rgba(255,255,255,.25);
+    position:relative; cursor:pointer; transition:background .2s;
+    border:none; padding:0;
+  }
+  .toggle.activo{ background:#1e8e3e; }
+  .toggle::after{
+    content:''; position:absolute; top:3px; left:3px; width:20px; height:20px;
+    border-radius:50%; background:#fff; transition:transform .2s;
+  }
+  .toggle.activo::after{ transform:translateX(20px); }
+
+  /* ---------- contenido ---------- */
+  main{ flex:1; padding:16px; padding-bottom:32px; }
+
+  .estado-conexion{
+    font-size:11px; color:var(--texto-mute); text-align:center; margin-bottom:12px;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .dot-conexion{ width:6px; height:6px; border-radius:50%; background:#22c55e; }
+  .dot-conexion.mala{ background:#f59e0b; }
+
+  .card{
+    background:#fff; border-radius:12px; padding:18px; margin-bottom:14px;
+    box-shadow:0 1px 4px rgba(0,56,118,.07); border:1px solid var(--borde);
+  }
+
+  /* ---------- estado vacío ---------- */
+  .vacio{ text-align:center; padding:50px 20px; color:var(--texto-mute); }
+  .vacio .icono{ font-size:38px; margin-bottom:12px; opacity:.5; }
+  .vacio p{ font-size:14px; margin:0; }
+  .vacio.desconectado .icono{ opacity:.3; }
+
+  /* ---------- tarjeta de oferta entrante ---------- */
+  .oferta-card{
+    border:2px solid var(--teal); background:#f0fbfb;
+    animation:pulso-borde 1.6s ease-in-out infinite;
+  }
+  @keyframes pulso-borde{
+    0%,100%{ border-color:var(--teal); }
+    50%{ border-color:var(--teal-dark); }
+  }
+  .oferta-card .badge-nueva{
+    display:inline-block; background:var(--teal); color:#fff; font-size:10.5px;
+    font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:3px 10px; border-radius:100px; margin-bottom:10px;
+  }
+  .oferta-card h2{ font-size:17px; margin:0 0 6px; color:var(--azul); }
+  .oferta-card .direccion{ font-size:13.5px; color:var(--texto); margin-bottom:4px; }
+  .oferta-card .distancia{ font-size:12px; color:var(--texto-mute); margin-bottom:14px; }
+  .oferta-botones{ display:flex; gap:10px; }
+  .btn-rechazar, .btn-aceptar{
+    flex:1; padding:13px; border:none; border-radius:9px; font-size:14.5px;
+    font-weight:700; cursor:pointer;
+  }
+  .btn-rechazar{ background:#fff; color:var(--rojo); border:1.5px solid #f0c2bb; }
+  .btn-aceptar{ background:var(--verde); color:#fff; }
+  .btn-rechazar:active, .btn-aceptar:active{ transform:scale(.97); }
+
+  /* ---------- tarjeta de servicio activo ---------- */
+  .servicio-card .top-row{
+    display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;
+  }
+  .servicio-card .tipo-badge{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--teal-dark); background:#e6f7f8; padding:4px 10px; border-radius:100px;
+  }
+  .servicio-card .paso-actual{
+    font-size:12px; color:var(--texto-mute); font-weight:600;
+  }
+  .servicio-card .direccion-cliente{
+    font-size:15px; font-weight:600; color:var(--azul); margin-bottom:2px;
+  }
+  .servicio-card .telefono-cliente{
+    font-size:12.5px; color:var(--texto-mute); margin-bottom:14px;
+  }
+
+  #mapaServicio{ width:100%; height:180px; border-radius:10px; margin-bottom:14px; background:var(--gris); }
+
+  .botones-accion{ display:flex; gap:10px; }
+  .btn-llamar{
+    width:48px; height:48px; border-radius:10px; background:var(--azul);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; text-decoration:none;
+  }
+  .btn-avanzar{
+    flex:1; padding:14px; border:none; border-radius:10px; background:var(--teal-dark);
+    color:#fff; font-size:15px; font-weight:700; cursor:pointer;
+  }
+  .btn-avanzar:active{ transform:scale(.98); }
+  .btn-avanzar:disabled{ background:#9bb6d6; cursor:not-allowed; }
+  .btn-avanzar.finalizar{ background:var(--verde); }
+
+  /* ---------- footer/help ---------- */
+  .ayuda{ text-align:center; margin-top:20px; }
+  .ayuda a{ color:var(--azul-claro); font-size:12.5px; text-decoration:none; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ==================== PANTALLA DE ACCESO ==================== -->
+  <div id="pantallaAcceso">
+    <div class="login-card">
+      <div class="logo-mark">S</div>
+      <h1>Panel de Proveedor</h1>
+      <p>Ingresa tu código de proveedor para comenzar tu turno</p>
+      <input type="text" id="inputProveedorId" placeholder="Código de proveedor" inputmode="numeric">
+      <button id="btnEntrar">Ingresar</button>
+      <div class="login-error" id="loginError"></div>
+    </div>
+  </div>
+
+  <!-- ==================== APP PRINCIPAL ==================== -->
+  <div id="appPrincipal" style="display:none; flex:1; flex-direction:column;">
+    <header>
+      <div class="quien">
+        <div class="nombre" id="nombreProveedor">—</div>
+        <div class="rol">Proveedor Sanitas</div>
+      </div>
+      <div class="switch-disp">
+        <span class="etiqueta off" id="etiquetaDisp">Desconectado</span>
+        <button class="toggle" id="toggleDisponible" aria-label="Disponibilidad"></button>
+      </div>
+    </header>
+
+    <main>
+      <div class="estado-conexion">
+        <span class="dot-conexion" id="dotConexion"></span>
+        <span id="textoConexion">Sincronizado</span>
+      </div>
+
+      <div id="contenedorDinamico"></div>
+
+      <div class="ayuda">
+        <a href="tel:+5116100100">¿Problemas? Llamar a Central Sanitas</a>
+      </div>
+    </main>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================
+   CONFIG
+   ========================================================= */
+const API_BASE = window.location.origin; // ajustar si el dominio del panel difiere del backend
+const POLL_INTERVAL_MS = 8000;
+const UBICACION_INTERVAL_ACTIVO_MS = 10000;   // con servicio asignado: cada 10s
+const UBICACION_INTERVAL_DISPONIBLE_MS = 45000; // solo disponible, sin servicio: cada 45s
+
+let proveedorId = null;
+let watchId = null;
+let ultimaPosicion = null;
+let intervaloUbicacion = null;
+let mapaServicio = null;
+let markerCliente = null;
+let markerProveedor = null;
+
+const PASOS_ORDEN = ["asignado", "en_camino", "llego", "en_atencion", "finalizado"];
+const PASO_SIGUIENTE = {
+  asignado: { estado: "en_camino", label: "Marcar: Salí en camino" },
+  en_camino: { estado: "llego", label: "Marcar: Llegué al domicilio" },
+  llego: { estado: "en_atencion", label: "Marcar: Inicié la atención" },
+  en_atencion: { estado: "finalizado", label: "Marcar: Servicio finalizado" },
+};
+const PASO_LABEL = {
+  asignado: "Asignado — prepárate para salir",
+  en_camino: "En camino al domicilio",
+  llego: "Llegaste al domicilio",
+  en_atencion: "Atención en curso",
+};
+
+/* =========================================================
+   LOGIN
+   ========================================================= */
+document.getElementById("btnEntrar").addEventListener("click", intentarIngresar);
+document.getElementById("inputProveedorId").addEventListener("keydown", e => {
+  if (e.key === "Enter") intentarIngresar();
+});
+
+function intentarIngresar() {
+  const valor = document.getElementById("inputProveedorId").value.trim();
+  if (!valor) {
+    document.getElementById("loginError").textContent = "Ingresa tu código de proveedor";
+    return;
+  }
+  proveedorId = valor;
+  document.getElementById("pantallaAcceso").style.display = "none";
+  document.getElementById("appPrincipal").style.display = "flex";
+  iniciarApp();
+}
+
+/* =========================================================
+   TOGGLE DISPONIBILIDAD
+   ========================================================= */
+let disponible = false;
+
+document.getElementById("toggleDisponible").addEventListener("click", async () => {
+  const nuevoEstado = disponible ? "desconectado" : "disponible";
+  try {
+    const res = await fetch(`${API_BASE}/proveedores/${proveedorId}/disponibilidad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estado: nuevoEstado }),
+    });
+    if (!res.ok) throw new Error("No se pudo actualizar");
+    aplicarDisponibilidad(nuevoEstado === "disponible");
+    gestionarEnvioUbicacion();
+  } catch (e) {
+    marcarConexion(false);
+  }
+});
+
+function aplicarDisponibilidad(activo) {
+  disponible = activo;
+  const toggle = document.getElementById("toggleDisponible");
+  const etiqueta = document.getElementById("etiquetaDisp");
+  toggle.classList.toggle("activo", activo);
+  etiqueta.textContent = activo ? "Disponible" : "Desconectado";
+  etiqueta.className = "etiqueta " + (activo ? "on" : "off");
+}
+
+/* =========================================================
+   POLLING DE ESTADO
+   ========================================================= */
+function iniciarApp() {
+  consultarEstadoActual();
+  setInterval(consultarEstadoActual, POLL_INTERVAL_MS);
+  iniciarGeolocalizacion();
+}
+
+async function consultarEstadoActual() {
+  try {
+    const res = await fetch(`${API_BASE}/proveedores/${proveedorId}/estado-actual`);
+    if (!res.ok) throw new Error("respuesta no ok");
+    const data = await res.json();
+    marcarConexion(true);
+    aplicarDisponibilidad(data.disponibilidad === "disponible" || data.disponibilidad === "en_oferta" || data.disponibilidad === "ocupado");
+    document.getElementById("nombreProveedor").textContent = data.nombre || `Proveedor #${proveedorId}`;
+    renderContenido(data);
+  } catch (e) {
+    marcarConexion(false);
+  }
+}
+
+function marcarConexion(ok) {
+  document.getElementById("dotConexion").className = "dot-conexion" + (ok ? "" : " mala");
+  document.getElementById("textoConexion").textContent = ok ? "Sincronizado" : "Sin conexión, reintentando…";
+}
+
+/* =========================================================
+   RENDER PRINCIPAL
+   ========================================================= */
+function renderContenido(data) {
+  const cont = document.getElementById("contenedorDinamico");
+
+  if (data.oferta_pendiente) {
+    cont.innerHTML = renderOferta(data.oferta_pendiente);
+    document.getElementById("btnAceptarOferta").onclick = () => responderOferta(data.oferta_pendiente.oferta_id, true);
+    document.getElementById("btnRechazarOferta").onclick = () => responderOferta(data.oferta_pendiente.oferta_id, false);
+    return;
+  }
+
+  if (data.servicio_activo) {
+    cont.innerHTML = renderServicioActivo(data.servicio_activo);
+    inicializarMapaServicio(data.servicio_activo);
+    const btnAvanzar = document.getElementById("btnAvanzarPaso");
+    if (btnAvanzar) {
+      btnAvanzar.onclick = () => avanzarPaso(data.servicio_activo.solicitud_id, data.servicio_activo.estado);
+    }
+    return;
+  }
+
+  cont.innerHTML = renderVacio(disponible);
+}
+
+function renderVacio(estaDisponible) {
+  if (!estaDisponible) {
+    return `
+      <div class="card vacio desconectado">
+        <div class="icono">💤</div>
+        <p>Estás desconectado.<br>Activa tu disponibilidad para recibir solicitudes.</p>
+      </div>`;
+  }
+  return `
+    <div class="card vacio">
+      <div class="icono">📡</div>
+      <p>Esperando nuevas solicitudes cerca de ti…</p>
+    </div>`;
+}
+
+function renderOferta(oferta) {
+  const nombreServicio = oferta.tipo_servicio === "AMBULANCIA" ? "Ambulancia" : "Médico a domicilio";
+  const distanciaTexto = oferta.distancia_metros != null ? `${(oferta.distancia_metros / 1000).toFixed(1)} km de tu ubicación` : "";
+  return `
+    <div class="card oferta-card">
+      <span class="badge-nueva">Nueva solicitud</span>
+      <h2>${nombreServicio}</h2>
+      <div class="direccion">${oferta.direccion || "Ubicación compartida por el cliente"}</div>
+      <div class="distancia">${distanciaTexto}</div>
+      <div class="oferta-botones">
+        <button class="btn-rechazar" id="btnRechazarOferta">Rechazar</button>
+        <button class="btn-aceptar" id="btnAceptarOferta">Aceptar</button>
+      </div>
+    </div>`;
+}
+
+function renderServicioActivo(servicio) {
+  const nombreServicio = servicio.tipo_servicio === "AMBULANCIA" ? "Ambulancia" : "Médico a domicilio";
+  const paso = PASO_SIGUIENTE[servicio.estado];
+  const esUltimoPaso = servicio.estado === "en_atencion";
+  return `
+    <div class="card servicio-card">
+      <div class="top-row">
+        <span class="tipo-badge">${nombreServicio}</span>
+        <span class="paso-actual">${PASO_LABEL[servicio.estado] || servicio.estado}</span>
+      </div>
+      <div class="direccion-cliente">${servicio.direccion || "Dirección no especificada"}</div>
+      <div class="telefono-cliente">${servicio.cliente_nombre || "Cliente"} · ${servicio.cliente_telefono || ""}</div>
+      <div id="mapaServicio"></div>
+      <div class="botones-accion">
+        <a class="btn-llamar" href="tel:${servicio.cliente_telefono || ''}" aria-label="Llamar al cliente">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        </a>
+        ${paso ? `<button class="btn-avanzar ${esUltimoPaso ? 'finalizar' : ''}" id="btnAvanzarPaso">${paso.label}</button>` : ""}
+      </div>
+    </div>`;
+}
+
+/* =========================================================
+   MAPA DEL SERVICIO ACTIVO
+   ========================================================= */
+function inicializarMapaServicio(servicio) {
+  const el = document.getElementById("mapaServicio");
+  if (!el || servicio.origen_lat == null) return;
+
+  if (mapaServicio) { mapaServicio.remove(); mapaServicio = null; }
+
+  mapaServicio = L.map("mapaServicio", { zoomControl: false, attributionControl: false })
+    .setView([servicio.origen_lat, servicio.origen_lng], 14);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 }).addTo(mapaServicio);
+
+  const iconoCliente = L.divIcon({
+    className: "", iconSize: [16, 16],
+    html: '<div style="width:16px;height:16px;border-radius:50%;background:#003876;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,56,118,.4);"></div>',
+  });
+  markerCliente = L.marker([servicio.origen_lat, servicio.origen_lng], { icon: iconoCliente }).addTo(mapaServicio);
+
+  if (ultimaPosicion) {
+    dibujarPosicionProveedorEnMapa();
+  }
+}
+
+function dibujarPosicionProveedorEnMapa() {
+  if (!mapaServicio || !ultimaPosicion) return;
+  const iconoProveedor = L.divIcon({
+    className: "", iconSize: [16, 16],
+    html: '<div style="width:16px;height:16px;border-radius:50%;background:#00A9B7;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,169,183,.5);"></div>',
+  });
+  const pos = [ultimaPosicion.lat, ultimaPosicion.lng];
+  if (!markerProveedor) {
+    markerProveedor = L.marker(pos, { icon: iconoProveedor }).addTo(mapaServicio);
+  } else {
+    markerProveedor.setLatLng(pos);
+  }
+  if (markerCliente) {
+    mapaServicio.fitBounds(L.latLngBounds([pos, markerCliente.getLatLng()]), { padding: [40, 40] });
+  }
+}
+
+/* =========================================================
+   ACCIONES: aceptar/rechazar oferta, avanzar paso
+   ========================================================= */
+async function responderOferta(ofertaId, aceptar) {
+  const ruta = aceptar ? "aceptar" : "rechazar";
+  try {
+    await fetch(`${API_BASE}/ofertas/${ofertaId}/${ruta}`, { method: "POST" });
+  } catch (e) {
+    // el próximo polling corrige el estado igual
+  }
+  consultarEstadoActual();
+}
+
+async function avanzarPaso(solicitudId, estadoActual) {
+  const paso = PASO_SIGUIENTE[estadoActual];
+  if (!paso) return;
+  const boton = document.getElementById("btnAvanzarPaso");
+  if (boton) { boton.disabled = true; boton.textContent = "Actualizando…"; }
+
+  try {
+    await fetch(`${API_BASE}/solicitudes/${solicitudId}/estado`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estado: paso.estado, proveedor_id: proveedorId }),
+    });
+  } catch (e) {
+    // el próximo polling corrige el estado
+  }
+  consultarEstadoActual();
+}
+
+/* =========================================================
+   GEOLOCALIZACIÓN
+   ========================================================= */
+function iniciarGeolocalizacion() {
+  if (!navigator.geolocation) return;
+
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      ultimaPosicion = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      dibujarPosicionProveedorEnMapa();
+    },
+    (err) => console.warn("Geolocalización:", err.message),
+    { enableHighAccuracy: true, maximumAge: 5000 }
+  );
+
+  gestionarEnvioUbicacion();
+}
+
+function gestionarEnvioUbicacion() {
+  if (intervaloUbicacion) clearInterval(intervaloUbicacion);
+  if (!disponible) return;
+
+  const frecuencia = UBICACION_INTERVAL_ACTIVO_MS; // simplificado: misma frecuencia con o sin servicio activo mientras está disponible
+  intervaloUbicacion = setInterval(enviarUbicacionActual, frecuencia);
+}
+
+async function enviarUbicacionActual() {
+  if (!ultimaPosicion || !proveedorId) return;
+  try {
+    await fetch(`${API_BASE}/proveedores/${proveedorId}/ubicacion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat: ultimaPosicion.lat, lng: ultimaPosicion.lng }),
+    });
+  } catch (e) {
+    // se reintenta en el próximo ciclo
+  }
+}
+</script>
+
+</body>
+</html>

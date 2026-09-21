@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mantenimiento de Asesores - Backoffice</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Segoe UI', system-ui, sans-serif; background:#f1f5f9; color:#1e293b; }
+  header { background:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  header h1 { font-size:18px; margin:0; }
+  .btn { padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:600; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-secondary { background:#e2e8f0; }
+  .btn-danger { background:#fee2e2; color:#b91c1c; }
+  .btn-sm { padding:4px 10px; font-size:12px; }
+
+  main { padding:20px; max-width:1100px; margin:0 auto; }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  th, td { padding:10px 12px; text-align:left; font-size:13px; border-bottom:1px solid #f1f5f9; }
+  th { background:#f8fafc; text-transform:uppercase; font-size:11px; color:#64748b; }
+  .badge { padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .badge-conectado { background:#dcfce7; color:#15803d; }
+  .badge-desconectado { background:#f1f5f9; color:#64748b; }
+  .badge-activo { background:#dbeafe; color:#1d4ed8; }
+  .badge-inactivo { background:#fee2e2; color:#b91c1c; }
+
+  .modal-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.5); align-items:center; justify-content:center; z-index:50; }
+  .modal { background:#fff; width:420px; max-width:92vw; border-radius:12px; padding:20px; }
+  .modal label { font-size:12px; font-weight:600; color:#475569; display:block; margin-top:10px; }
+  .modal input, .modal select { width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; margin-top:4px; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen" style="display:flex; align-items:center; justify-content:center; height:100vh;">
+  <div style="background:#fff; padding:32px; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,.08); width:300px;">
+    <h2 style="margin-top:0; font-size:18px;">Backoffice - Ingreso Admin</h2>
+    <input id="login-usuario" placeholder="Usuario" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #cbd5e1; border-radius:6px;">
+    <input id="login-password" type="password" placeholder="Contraseña" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #cbd5e1; border-radius:6px;">
+    <div id="login-error" style="color:#dc2626; font-size:13px; min-height:18px;"></div>
+    <button onclick="doLogin()" style="width:100%; padding:10px; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Ingresar</button>
+    <div style="text-align:center; margin-top:10px;">
+      <a href="#" onclick="abrirModalReset(); return false;" style="font-size:12px; color:#2563eb;">¿Olvidaste tu contraseña?</a>
+    </div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
+<header>
+  <h1>Mantenimiento de Asesores</h1>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <button class="btn btn-primary" onclick="abrirModalNuevo()">+ Nuevo asesor</button>
+    <button class="btn btn-secondary" onclick="doLogout()">Salir</button>
+  </div>
+</header>
+
+<main>
+  <table>
+    <thead>
+      <tr>
+        <th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Conexión</th>
+        <th>Última conexión</th><th>Tiempo conectado</th><th>Tareas cerradas</th><th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="tabla-asesores"></tbody>
+  </table>
+</main>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const API_BASE = "https://sntspe.com/backoffice"; // <-- ajustar a la URL real de sofi-apis
+
+let sesion = JSON.parse(localStorage.getItem("bo_sesion") || "null");
+
+function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (sesion && sesion.token) headers["Authorization"] = "Bearer " + sesion.token;
+  return fetch(API_BASE + path, { headers, ...opts }).then(async r => {
+    if (r.status === 401) { localStorage.removeItem("bo_sesion"); location.reload(); }
+    return r.json();
+  });
+}
+
+async function doLogin() {
+  const usuario = document.getElementById("login-usuario").value.trim();
+  const password = document.getElementById("login-password").value;
+  const res = await fetch(API_BASE + "/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usuario, password }),
+  }).then(r => r.json());
+  if (!res.ok) {
+    document.getElementById("login-error").textContent = res.error || "Error de ingreso";
+    return;
+  }
+  if (res.asesor.rol !== "ADMIN") {
+    document.getElementById("login-error").textContent = "Esta página es solo para administradores";
+    return;
+  }
+  sesion = { asesor: res.asesor, token: res.token };
+  localStorage.setItem("bo_sesion", JSON.stringify(sesion));
+  mostrarApp();
+}
+
+async function doLogout() {
+  if (sesion) await api("/logout", { method: "POST" });
+  localStorage.removeItem("bo_sesion");
+  location.reload();
+}
+
+function abrirModalReset() {
+  abrirModal(`
+    <h3>Restablecer contraseña</h3>
+    <p style="font-size:13px; color:#64748b;">Ingresa tu usuario. Si tienes celular registrado, te llegará un código por SMS.</p>
+    <label>Usuario</label><input id="reset-usuario">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="solicitarCodigoReset()">Enviar código</button>
+    </div>
+  `);
+}
+
+async function solicitarCodigoReset() {
+  const usuario = document.getElementById("reset-usuario").value.trim();
+  if (!usuario) return;
+  const res = await fetch(API_BASE + "/solicitar-reset", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usuario }),
+  }).then(r => r.json());
+
+  abrirModal(`
+    <h3>Restablecer contraseña</h3>
+    <p style="font-size:13px; color:#16a34a;">${res.mensaje || "Código enviado."}</p>
+    <label>Código recibido por SMS</label><input id="reset-codigo" maxlength="6">
+    <label>Nueva contraseña</label><input id="reset-nueva-password" type="password">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarReset('${usuario}')">Cambiar contraseña</button>
+    </div>
+  `);
+}
+
+async function confirmarReset(usuario) {
+  const codigo = document.getElementById("reset-codigo").value.trim();
+  const nueva_password = document.getElementById("reset-nueva-password").value;
+  const res = await fetch(API_BASE + "/confirmar-reset", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usuario, codigo, nueva_password }),
+  }).then(r => r.json());
+
+  if (!res.ok) { alert(res.error || "No se pudo cambiar la contraseña"); return; }
+  cerrarModal();
+  alert("Contraseña actualizada. Ya puedes iniciar sesión con tu nueva clave.");
+}
+
+function mostrarApp() {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  cargarAsesores();
+}
+
+function abrirModal(html) {
+  document.getElementById("modal-content").innerHTML = html;
+  document.getElementById("modal-overlay").style.display = "flex";
+}
+function cerrarModal() { document.getElementById("modal-overlay").style.display = "none"; }
+
+async function cargarAsesores() {
+  const res = await api("/asesores");
+  if (!res.ok) return;
+  const tbody = document.getElementById("tabla-asesores");
+  tbody.innerHTML = "";
+
+  for (const a of res.asesores) {
+    const prod = await api(`/asesores/${a.id}/productividad`);
+    const horas = prod.ok ? prod.tiempo_conectado_horas : "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${a.nombre_completo}</td>
+      <td>${a.usuario}</td>
+      <td>${a.rol}</td>
+      <td><span class="badge badge-${a.estado.toLowerCase()}">${a.estado}</span></td>
+      <td><span class="badge badge-${a.estado_conexion.toLowerCase()}">${a.estado_conexion}</span></td>
+      <td>${a.ultima_conexion ? new Date(a.ultima_conexion).toLocaleString("es-PE") : "-"}</td>
+      <td>${horas} h</td>
+      <td>${a.tareas_resueltas}</td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick='abrirModalEditar(${JSON.stringify(a)})'>Editar</button>
+        ${a.estado === "ACTIVO"
+          ? `<button class="btn btn-danger btn-sm" onclick="darDeBaja(${a.id})">Dar de baja</button>`
+          : `<button class="btn btn-secondary btn-sm" onclick="reactivar(${a.id})">Reactivar</button>`}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function abrirModalNuevo() {
+  abrirModal(`
+    <h3>Nuevo asesor</h3>
+    <label>Nombre completo</label><input id="f-nombre">
+    <label>Usuario</label><input id="f-usuario">
+    <label>Contraseña</label><input id="f-password" type="password">
+    <label>Correo</label><input id="f-correo">
+    <label>Celular</label><input id="f-celular">
+    <label>Rol</label>
+    <select id="f-rol"><option value="ASESOR">Asesor</option><option value="ADMIN">Admin</option></select>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarNuevo()">Crear</button>
+    </div>
+  `);
+}
+
+async function guardarNuevo() {
+  const body = {
+    nombre_completo: document.getElementById("f-nombre").value,
+    usuario: document.getElementById("f-usuario").value,
+    password: document.getElementById("f-password").value,
+    correo: document.getElementById("f-correo").value,
+    celular: document.getElementById("f-celular").value,
+    rol: document.getElementById("f-rol").value,
+  };
+  const res = await api("/asesores", { method: "POST", body: JSON.stringify(body) });
+  if (res.ok) { cerrarModal(); cargarAsesores(); }
+  else alert(res.error || "Error al crear asesor");
+}
+
+function abrirModalEditar(a) {
+  abrirModal(`
+    <h3>Editar asesor</h3>
+    <label>Nombre completo</label><input id="f-nombre" value="${a.nombre_completo}">
+    <label>Correo</label><input id="f-correo" value="${a.correo || ""}">
+    <label>Celular</label><input id="f-celular" value="${a.celular || ""}">
+    <label>Rol</label>
+    <select id="f-rol">
+      <option value="ASESOR" ${a.rol==="ASESOR"?"selected":""}>Asesor</option>
+      <option value="ADMIN" ${a.rol==="ADMIN"?"selected":""}>Admin</option>
+    </select>
+    <label>Nueva contraseña (opcional)</label><input id="f-password" type="password" placeholder="Dejar vacío para no cambiar">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarEdicion(${a.id})">Guardar</button>
+    </div>
+  `);
+}
+
+async function guardarEdicion(id) {
+  const body = {
+    nombre_completo: document.getElementById("f-nombre").value,
+    correo: document.getElementById("f-correo").value,
+    celular: document.getElementById("f-celular").value,
+    rol: document.getElementById("f-rol").value,
+  };
+  const password = document.getElementById("f-password").value;
+  if (password) body.password = password;
+  const res = await api(`/asesores/${id}`, { method: "PUT", body: JSON.stringify(body) });
+  if (res.ok) { cerrarModal(); cargarAsesores(); }
+}
+
+async function darDeBaja(id) {
+  if (!confirm("¿Dar de baja a este asesor?")) return;
+  await api(`/asesores/${id}`, { method: "PUT", body: JSON.stringify({ estado: "INACTIVO" }) });
+  cargarAsesores();
+}
+
+async function reactivar(id) {
+  await api(`/asesores/${id}`, { method: "PUT", body: JSON.stringify({ estado: "ACTIVO" }) });
+  cargarAsesores();
+}
+
+document.getElementById("modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "modal-overlay") cerrarModal();
+});
+
+if (sesion) mostrarApp();
+</script>
+</body>
+</html>

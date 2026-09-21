@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Nueva solicitud — Sanitas</title>
+<meta name="robots" content="noindex, nofollow">
+
+<style>
+  :root{
+    --azul:        #003876;
+    --azul-claro:  #0057b8;
+    --teal:        #00A9B7;
+    --teal-dark:   #007A87;
+    --gris:        #f4f6f9;
+    --borde:       #d7dde5;
+    --rojo:        #c0392b;
+    --verde:       #1e8e3e;
+    --texto:       #1f2937;
+    --texto-mute:  #6b7a82;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--gris); }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    color:var(--texto);
+    min-height:100vh; min-height:100dvh;
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+
+  .card{
+    background:#fff; border-radius:16px; padding:28px 24px; width:100%; max-width:420px;
+    box-shadow:0 4px 20px rgba(0,56,118,.12);
+  }
+
+  .logo-mark{
+    width:48px; height:48px; border-radius:12px; margin:0 auto 16px;
+    background:linear-gradient(135deg,var(--azul),var(--teal-dark));
+    display:flex; align-items:center; justify-content:center; color:#fff;
+    font-weight:700; font-size:18px;
+  }
+
+  .badge-nueva{
+    display:block; text-align:center; background:var(--teal); color:#fff; font-size:11px;
+    font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:5px 10px; border-radius:100px; margin-bottom:14px; width:fit-content; margin-left:auto; margin-right:auto;
+  }
+
+  h1{ font-size:19px; text-align:center; margin:0 0 18px; color:var(--azul); }
+
+  .detalle{
+    background:var(--gris); border-radius:10px; padding:16px; margin-bottom:20px;
+  }
+  .detalle .fila{ display:flex; justify-content:space-between; padding:6px 0; font-size:13.5px; }
+  .detalle .fila .k{ color:var(--texto-mute); }
+  .detalle .fila .v{ font-weight:600; text-align:right; max-width:60%; }
+
+  .botones{ display:flex; gap:10px; }
+  .btn-rechazar, .btn-aceptar{
+    flex:1; padding:15px; border:none; border-radius:10px; font-size:15px;
+    font-weight:700; cursor:pointer;
+  }
+  .btn-rechazar{ background:#fff; color:var(--rojo); border:1.5px solid #f0c2bb; }
+  .btn-aceptar{ background:var(--verde); color:#fff; }
+  .btn-rechazar:active, .btn-aceptar:active{ transform:scale(.97); }
+  .btn-rechazar:disabled, .btn-aceptar:disabled{ opacity:.5; cursor:not-allowed; }
+
+  .estado-final{ text-align:center; padding:20px 0; }
+  .estado-final .icono{ font-size:44px; margin-bottom:12px; }
+  .estado-final h2{ font-size:18px; margin:0 0 6px; color:var(--azul); }
+  .estado-final p{ font-size:13.5px; color:var(--texto-mute); margin:0 0 18px; }
+  .estado-final a.btn-panel{
+    display:block; text-align:center; padding:13px; background:var(--azul-claro); color:#fff;
+    border-radius:9px; text-decoration:none; font-weight:700; font-size:14px;
+  }
+
+  .cargando{ text-align:center; padding:30px 0; color:var(--texto-mute); font-size:13.5px; }
+
+  .error-box{ text-align:center; padding:20px 0; color:var(--rojo); font-size:14px; }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <div class="cargando" id="cargando">Cargando solicitud...</div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const TOKEN = location.pathname.split('/oferta/')[1]?.replace(/\/$/, '');
+
+const card = document.getElementById('card');
+
+async function cargarOferta() {
+  try {
+    const res = await fetch(`${API_BASE}/oferta/${TOKEN}/estado`);
+    if (!res.ok) throw new Error('no encontrada');
+    const data = await res.json();
+
+    if (data.estado !== 'pendiente') {
+      renderYaRespondida(data);
+      return;
+    }
+
+    renderOferta(data);
+  } catch (e) {
+    renderError();
+  }
+}
+
+function renderOferta(data) {
+  const nombreServicio = data.tipo_servicio === 'AMBULANCIA' ? 'Ambulancia' : 'Médico a domicilio';
+  const distanciaTexto = data.distancia_metros != null
+    ? `${(data.distancia_metros / 1000).toFixed(1)} km de tu ubicación`
+    : '—';
+
+  card.innerHTML = `
+    <div class="logo-mark">S</div>
+    <span class="badge-nueva">Nueva solicitud</span>
+    <h1>${nombreServicio}</h1>
+    <div class="detalle">
+      <div class="fila"><span class="k">Dirección</span><span class="v">${data.direccion || 'Ubicación compartida por el cliente'}</span></div>
+      <div class="fila"><span class="k">Distancia</span><span class="v">${distanciaTexto}</span></div>
+    </div>
+    <div class="botones">
+      <button class="btn-rechazar" id="btnRechazar">Rechazar</button>
+      <button class="btn-aceptar" id="btnAceptar">Aceptar</button>
+    </div>
+  `;
+
+  document.getElementById('btnAceptar').onclick = () => responder('aceptar');
+  document.getElementById('btnRechazar').onclick = () => responder('rechazar');
+}
+
+async function responder(accion) {
+  const btnAceptar = document.getElementById('btnAceptar');
+  const btnRechazar = document.getElementById('btnRechazar');
+  btnAceptar.disabled = true;
+  btnRechazar.disabled = true;
+  (accion === 'aceptar' ? btnAceptar : btnRechazar).textContent = 'Enviando...';
+
+  try {
+    const res = await fetch(`${API_BASE}/oferta/${TOKEN}/${accion}`, { method: 'POST' });
+    const data = await res.json();
+
+    if (accion === 'aceptar' && data.status === 'ok') {
+      renderConfirmacion('aceptada');
+    } else if (accion === 'rechazar' && data.status === 'rechazada') {
+      renderConfirmacion('rechazada');
+    } else {
+      renderConfirmacion('vencida');
+    }
+  } catch (e) {
+    renderError();
+  }
+}
+
+function renderConfirmacion(resultado) {
+  if (resultado === 'aceptada') {
+    card.innerHTML = `
+      <div class="estado-final">
+        <div class="icono">✅</div>
+        <h2>Servicio aceptado</h2>
+        <p>Abre tu panel de proveedor para ver la dirección completa y comenzar.</p>
+        <a class="btn-panel" href="/proveedor">Ir a mi panel</a>
+      </div>`;
+  } else if (resultado === 'rechazada') {
+    card.innerHTML = `
+      <div class="estado-final">
+        <div class="icono">👍</div>
+        <h2>Servicio rechazado</h2>
+        <p>Buscaremos otro proveedor disponible. Gracias por responder.</p>
+      </div>`;
+  } else {
+    card.innerHTML = `
+      <div class="estado-final">
+        <div class="icono">⏱️</div>
+        <h2>Esta solicitud ya no está disponible</h2>
+        <p>Es probable que ya haya sido tomada por otro proveedor o haya expirado.</p>
+        <a class="btn-panel" href="/proveedor">Ir a mi panel</a>
+      </div>`;
+  }
+}
+
+function renderYaRespondida(data) {
+  const mapaEstados = {
+    aceptada: { icono: '✅', titulo: 'Ya aceptaste este servicio', texto: 'Revisa tu panel de proveedor para continuar.' },
+    rechazada: { icono: '👍', titulo: 'Ya rechazaste esta solicitud', texto: 'No necesitas hacer nada más.' },
+    expirada: { icono: '⏱️', titulo: 'Esta solicitud expiró', texto: 'Fue reasignada a otro proveedor por falta de respuesta.' },
+  };
+  const info = mapaEstados[data.estado] || { icono: 'ℹ️', titulo: 'Solicitud no disponible', texto: '' };
+
+  card.innerHTML = `
+    <div class="estado-final">
+      <div class="icono">${info.icono}</div>
+      <h2>${info.titulo}</h2>
+      <p>${info.texto}</p>
+      <a class="btn-panel" href="/proveedor">Ir a mi panel</a>
+    </div>`;
+}
+
+function renderError() {
+  card.innerHTML = `
+    <div class="error-box">
+      No pudimos cargar esta solicitud. El enlace puede haber expirado.<br><br>
+      <a class="btn-panel" href="/proveedor" style="margin-top:12px;">Ir a mi panel</a>
+    </div>`;
+}
+
+cargarOferta();
+</script>
+
+</body>
+</html>

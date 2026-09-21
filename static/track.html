@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Seguimiento del servicio</title>
+<meta name="robots" content="noindex, nofollow">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:        #10221f;
+    --teal-deep:  #0e3b3a;
+    --teal-mid:   #17615c;
+    --mint:       #eef5f1;
+    --paper:      #fbfaf7;
+    --line:       #d9e3de;
+    --pulse:      #2d6cdf;
+    --amber:      #c98a1f;
+    --danger:     #b8433a;
+    --muted:      #5b6f6a;
+    --radius:     18px;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+    min-height:100dvh;
+  }
+
+  ::selection{ background:var(--teal-mid); color:#fff; }
+
+  /* ---------- layout shell ---------- */
+  .shell{
+    max-width:520px;
+    margin:0 auto;
+    min-height:100vh;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    background:var(--paper);
+  }
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:16px 18px;
+    background:var(--teal-deep);
+    color:#fff;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .brand-mark{
+    width:32px; height:32px;
+    border-radius:9px;
+    background:linear-gradient(155deg,#1c8079,var(--teal-deep));
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:16px;
+    flex-shrink:0;
+  }
+  .brand-text{ line-height:1.15; }
+  .brand-text .eyebrow{
+    font-family:'JetBrains Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    color:#9fd4cc;
+  }
+  .brand-text .name{
+    font-family:'Fraunces',serif;
+    font-size:16.5px;
+    font-weight:500;
+  }
+  .service-badge{
+    font-family:'JetBrains Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    padding:6px 10px;
+    border-radius:100px;
+    border:1px solid rgba(255,255,255,.28);
+    color:#dff0ec;
+  }
+
+  /* ---------- map ---------- */
+  .map-wrap{
+    position:relative;
+    height:46vh;
+    min-height:280px;
+    background:var(--mint);
+    flex-shrink:0;
+  }
+  #map{ width:100%; height:100%; }
+
+  .leaflet-container{ font-family:'Inter',sans-serif; }
+
+  .eta-chip{
+    position:absolute;
+    top:14px; left:14px;
+    z-index:500;
+    background:rgba(16,34,31,.92);
+    color:#fff;
+    padding:9px 14px 9px 12px;
+    border-radius:100px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    box-shadow:0 6px 18px rgba(14,59,58,.28);
+    backdrop-filter:blur(4px);
+  }
+  .eta-dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--pulse);
+    box-shadow:0 0 0 0 rgba(45,108,223,.6);
+    animation:ping 1.8s ease-out infinite;
+    flex-shrink:0;
+  }
+  @keyframes ping{
+    0%{ box-shadow:0 0 0 0 rgba(45,108,223,.55); }
+    70%{ box-shadow:0 0 0 9px rgba(45,108,223,0); }
+    100%{ box-shadow:0 0 0 0 rgba(45,108,223,0); }
+  }
+  .eta-chip .eta-num{
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    font-weight:500;
+    white-space:nowrap;
+  }
+
+  .recenter-btn{
+    position:absolute;
+    bottom:14px; right:14px;
+    z-index:500;
+    width:40px; height:40px;
+    border-radius:50%;
+    background:#fff;
+    border:1px solid var(--line);
+    box-shadow:0 6px 14px rgba(14,59,58,.18);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    color:var(--teal-deep);
+  }
+  .recenter-btn:active{ transform:scale(.94); }
+
+  /* custom leaflet marker */
+  .marker-provider{
+    width:22px; height:22px;
+    border-radius:50%;
+    background:var(--pulse);
+    border:3px solid #fff;
+    box-shadow:0 3px 10px rgba(45,108,223,.45);
+  }
+  .marker-provider::after{
+    content:'';
+    position:absolute;
+    inset:-10px;
+    border-radius:50%;
+    border:2px solid var(--pulse);
+    opacity:.5;
+    animation:ring 2.2s ease-out infinite;
+  }
+  @keyframes ring{
+    0%{ transform:scale(.6); opacity:.55; }
+    100%{ transform:scale(1.9); opacity:0; }
+  }
+  .marker-origin{
+    width:14px; height:14px;
+    border-radius:50%;
+    background:var(--teal-deep);
+    border:3px solid #fff;
+    box-shadow:0 2px 6px rgba(14,59,58,.4);
+  }
+
+  /* ---------- status rail ---------- */
+  .rail-section{
+    padding:20px 20px 6px;
+  }
+  .rail{
+    display:flex;
+    justify-content:space-between;
+    position:relative;
+  }
+  .rail::before{
+    content:'';
+    position:absolute;
+    top:5px; left:12px; right:12px;
+    height:2px;
+    background:var(--line);
+    z-index:0;
+  }
+  .rail-step{
+    position:relative;
+    z-index:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:7px;
+    flex:1;
+  }
+  .rail-step .dot{
+    width:12px; height:12px;
+    border-radius:50%;
+    background:var(--paper);
+    border:2px solid var(--line);
+    transition:all .25s ease;
+  }
+  .rail-step.done .dot{
+    background:var(--teal-mid);
+    border-color:var(--teal-mid);
+  }
+  .rail-step.active .dot{
+    background:var(--pulse);
+    border-color:var(--pulse);
+    box-shadow:0 0 0 4px rgba(45,108,223,.18);
+  }
+  .rail-step .label{
+    font-size:10.5px;
+    font-family:'JetBrains Mono',monospace;
+    letter-spacing:.02em;
+    color:var(--muted);
+    text-align:center;
+    max-width:64px;
+  }
+  .rail-step.done .label,
+  .rail-step.active .label{ color:var(--ink); font-weight:500; }
+
+  /* ---------- provider card ---------- */
+  .card{
+    margin:18px 20px 0;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px 16px;
+    display:flex;
+    align-items:center;
+    gap:13px;
+  }
+  .avatar{
+    width:48px; height:48px;
+    border-radius:50%;
+    background:var(--mint);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Fraunces',serif;
+    font-size:18px;
+    font-weight:600;
+    color:var(--teal-deep);
+    flex-shrink:0;
+  }
+  .card-body{ flex:1; min-width:0; }
+  .card-body .status-line{
+    font-family:'Fraunces',serif;
+    font-size:16px;
+    font-weight:500;
+    line-height:1.3;
+  }
+  .card-body .sub-line{
+    font-size:12.5px;
+    color:var(--muted);
+    margin-top:2px;
+  }
+  .call-btn{
+    width:42px; height:42px;
+    border-radius:50%;
+    background:var(--teal-deep);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+    text-decoration:none;
+  }
+  .call-btn:active{ transform:scale(.94); }
+
+  /* ---------- detail rows ---------- */
+  .detail{
+    margin:12px 20px 0;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+  .detail-row{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    padding:12px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  .detail-row:last-child{ border-bottom:none; }
+  .detail-row .k{
+    font-size:12.5px;
+    color:var(--muted);
+  }
+  .detail-row .v{
+    font-family:'JetBrains Mono',monospace;
+    font-size:12.5px;
+    color:var(--ink);
+    text-align:right;
+  }
+
+  footer{
+    margin-top:auto;
+    padding:22px 20px 28px;
+    text-align:center;
+  }
+  footer .help{
+    font-size:11.5px;
+    color:var(--muted);
+    line-height:1.6;
+  }
+  footer .help a{ color:var(--teal-mid); text-decoration:none; }
+
+  @media (prefers-reduced-motion: reduce){
+    .eta-dot, .marker-provider::after{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark">S</div>
+      <div class="brand-text">
+        <div class="eyebrow">Sanitas · en vivo</div>
+        <div class="name" id="tituloServicio">Médico a domicilio</div>
+      </div>
+    </div>
+    <div class="service-badge" id="badgeEstado">Buscando</div>
+  </header>
+
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="eta-chip">
+      <div class="eta-dot"></div>
+      <div class="eta-num" id="etaTexto">Calculando…</div>
+    </div>
+    <div class="recenter-btn" id="btnRecenter" aria-label="Centrar mapa">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2"/></svg>
+    </div>
+  </div>
+
+  <div class="rail-section">
+    <div class="rail" id="rail"></div>
+  </div>
+
+  <div class="card">
+    <div class="avatar" id="avatarIniciales">—</div>
+    <div class="card-body">
+      <div class="status-line" id="statusPrincipal">Buscando proveedor cercano</div>
+      <div class="sub-line" id="statusSecundario">Esto puede tardar unos minutos</div>
+    </div>
+    <a class="call-btn" id="btnLlamar" href="#" style="display:none" aria-label="Llamar">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+    </a>
+  </div>
+
+  <div class="detail">
+    <div class="detail-row">
+      <div class="k">Servicio</div>
+      <div class="v" id="detTipo">—</div>
+    </div>
+    <div class="detail-row">
+      <div class="k">Dirección de recojo</div>
+      <div class="v" id="detOrigen">—</div>
+    </div>
+    <div class="detail-row">
+      <div class="k">Última actualización</div>
+      <div class="v" id="detUltimaAct">—</div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="help">
+      ¿Necesitas ayuda con tu servicio?<br>
+      <a href="tel:+5116100100">Llamar a Central Sanitas</a>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+/* =========================================================
+   CONFIG — reemplazar por los valores reales de despliegue
+   ========================================================= */
+const TRACKING_TOKEN = (location.pathname.split('/track/')[1] || '').replace(/\/$/, '');
+const API_ESTADO_URL = `/track/${TRACKING_TOKEN}/estado`;
+const POLL_INTERVAL_MS = 7000;
+const VELOCIDAD_PROMEDIO_KMH = 22; // heurística para estimar ETA en zona urbana
+
+/* Pasos de la máquina de estados (debe calzar con `solicitudes.estado`) */
+const PASOS = [
+  { key: 'buscando_proveedor', label: 'Solicitado' },
+  { key: 'asignado',           label: 'Asignado' },
+  { key: 'en_camino',          label: 'En camino' },
+  { key: 'llego',              label: 'Llegó' },
+  { key: 'en_atencion',        label: 'Atención' },
+  { key: 'finalizado',         label: 'Finalizado' },
+];
+
+const TEXTOS_ESTADO = {
+  buscando_proveedor: { badge: 'Buscando',  principal: 'Buscando proveedor cercano', secundario: 'Esto puede tardar unos minutos' },
+  asignado:           { badge: 'Asignado',  principal: 'Proveedor asignado',          secundario: 'Preparándose para salir' },
+  en_camino:          { badge: 'En camino', principal: 'En camino a tu domicilio',    secundario: 'Sigue el recorrido en el mapa' },
+  llego:              { badge: 'Llegó',     principal: 'Tu proveedor ha llegado',     secundario: 'Dirígete a la puerta principal' },
+  en_atencion:        { badge: 'Atención',  principal: 'Atención en curso',           secundario: 'El servicio está siendo brindado' },
+  finalizado:         { badge: 'Finalizado',principal: 'Servicio finalizado',         secundario: 'Gracias por confiar en Sanitas' },
+  cancelado:          { badge: 'Cancelado', principal: 'Servicio cancelado',          secundario: 'Contáctanos si fue un error' },
+};
+
+/* =========================================================
+   MAPA
+   ========================================================= */
+const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-12.0464,-77.0428], 14);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+}).addTo(map);
+
+const iconProvider = L.divIcon({ className:'', html:'<div class="marker-provider"></div>', iconSize:[22,22] });
+const iconOrigin   = L.divIcon({ className:'', html:'<div class="marker-origin"></div>', iconSize:[14,14] });
+
+let markerProvider = null;
+let markerOrigin = null;
+let routeLine = null;
+let ultimaPosProveedor = null;
+let origenCoords = null;
+
+document.getElementById('btnRecenter').addEventListener('click', () => {
+  const puntos = [markerProvider, markerOrigin].filter(Boolean).map(m => m.getLatLng());
+  if (puntos.length) map.fitBounds(L.latLngBounds(puntos), { padding:[50,70] });
+});
+
+/* =========================================================
+   POLLING DE ESTADO
+   ========================================================= */
+async function consultarEstado(){
+  try{
+    const res = await fetch(API_ESTADO_URL, { cache:'no-store' });
+    if(!res.ok) throw new Error('respuesta no ok');
+    const data = await res.json();
+    render(data);
+  }catch(err){
+    // Sin backend real conectado todavía: se muestra un recorrido simulado
+    // para poder revisar el diseño. Quitar renderDemo() al conectar la API.
+    renderDemo();
+  }
+}
+
+function render(data){
+  const cfg = TEXTOS_ESTADO[data.estado] || TEXTOS_ESTADO.buscando_proveedor;
+
+  document.getElementById('tituloServicio').textContent =
+    data.tipo_servicio === 'AMBULANCIA' ? 'Servicio de ambulancia' : 'Médico a domicilio';
+  document.getElementById('badgeEstado').textContent = cfg.badge;
+  document.getElementById('statusPrincipal').textContent = cfg.principal;
+  document.getElementById('statusSecundario').textContent = cfg.secundario;
+  document.getElementById('detTipo').textContent = data.tipo_servicio === 'AMBULANCIA' ? 'Ambulancia' : 'MAD';
+  document.getElementById('detUltimaAct').textContent = new Date().toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+
+  if (data.proveedor_nombre){
+    document.getElementById('avatarIniciales').textContent = iniciales(data.proveedor_nombre);
+  }
+
+  renderRail(data.estado);
+
+  if (data.origen){
+    origenCoords = [data.origen.lat, data.origen.lng];
+    if (!markerOrigin){
+      markerOrigin = L.marker(origenCoords, { icon: iconOrigin }).addTo(map);
+    } else {
+      markerOrigin.setLatLng(origenCoords);
+    }
+    document.getElementById('detOrigen').textContent = `${data.origen.lat.toFixed(5)}, ${data.origen.lng.toFixed(5)}`;
+  }
+
+  if (data.proveedor_ubicacion){
+    const pos = [data.proveedor_ubicacion.lat, data.proveedor_ubicacion.lng];
+    if (!markerProvider){
+      markerProvider = L.marker(pos, { icon: iconProvider }).addTo(map);
+    } else {
+      markerProvider.setLatLng(pos);
+    }
+    actualizarLinea(pos, origenCoords);
+    actualizarETA(pos, origenCoords);
+    ultimaPosProveedor = pos;
+    document.getElementById('btnLlamar').style.display = 'flex';
+
+    if (!map._boundsFitOnce){
+      const puntos = [pos, origenCoords].filter(Boolean);
+      if (puntos.length) map.fitBounds(L.latLngBounds(puntos), { padding:[50,70] });
+      map._boundsFitOnce = true;
+    }
+  } else {
+    document.getElementById('etaTexto').textContent = cfg.badge;
+  }
+}
+
+function renderRail(estadoActual){
+  const rail = document.getElementById('rail');
+  rail.innerHTML = '';
+  const idxActual = PASOS.findIndex(p => p.key === estadoActual);
+  PASOS.forEach((paso, i) => {
+    const el = document.createElement('div');
+    el.className = 'rail-step' + (i < idxActual ? ' done' : i === idxActual ? ' active' : '');
+    el.innerHTML = `<div class="dot"></div><div class="label">${paso.label}</div>`;
+    rail.appendChild(el);
+  });
+}
+
+function actualizarLinea(posProveedor, posOrigen){
+  if (!posOrigen) return;
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline([posProveedor, posOrigen], {
+    color:'#2d6cdf', weight:3, opacity:.55, dashArray:'1,9', lineCap:'round'
+  }).addTo(map);
+}
+
+function actualizarETA(posProveedor, posOrigen){
+  if (!posOrigen) return;
+  const distKm = distanciaKm(posProveedor[0], posProveedor[1], posOrigen[0], posOrigen[1]);
+  const minutos = Math.max(1, Math.round((distKm / VELOCIDAD_PROMEDIO_KMH) * 60));
+  document.getElementById('etaTexto').textContent = `~${minutos} min · ${distKm.toFixed(1)} km`;
+}
+
+function distanciaKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function iniciales(nombre){
+  return nombre.split(' ').filter(Boolean).slice(0,2).map(p => p[0].toUpperCase()).join('');
+}
+
+/* =========================================================
+   MODO DEMO — solo para previsualizar el diseño sin backend
+   ========================================================= */
+let demoStep = 0;
+const demoOrigen = { lat:-12.0900, lng:-77.0370 };
+let demoProveedor = { lat:-12.1010, lng:-77.0300 };
+const demoEstados = ['buscando_proveedor','asignado','en_camino','en_camino','en_camino','llego','en_atencion'];
+
+function renderDemo(){
+  if (demoStep < demoEstados.length - 1 && Math.random() > .55) demoStep++;
+  const estado = demoEstados[demoStep];
+
+  if (estado === 'en_camino'){
+    demoProveedor.lat += (demoOrigen.lat - demoProveedor.lat) * 0.18;
+    demoProveedor.lng += (demoOrigen.lng - demoProveedor.lng) * 0.18;
+  }
+
+  render({
+    estado,
+    tipo_servicio: 'MAD',
+    proveedor_nombre: 'Dr. Carlos Mendoza',
+    origen: demoOrigen,
+    proveedor_ubicacion: estado === 'buscando_proveedor' ? null : demoProveedor,
+  });
+}
+
+/* =========================================================
+   INICIO
+   ========================================================= */
+consultarEstado();
+setInterval(consultarEstado, POLL_INTERVAL_MS);
+</script>
+
+</body>
+</html>

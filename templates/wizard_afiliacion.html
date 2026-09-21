@@ -67,19 +67,30 @@ input[type="text"], input[type="number"], input[type="date"], select, textarea {
   border-radius: 8px; padding: 10px; margin-top: 8px;
 }
 .detalle-diagnostico.visible { display: block; }
-.persona-tab-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.persona-tab-nav {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;
+  position: sticky; top: 0; background: var(--white); padding: 6px 0; z-index: 5;
+}
 .persona-tab-btn {
   padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
   background: var(--white); font-size: 12px; font-weight: 600; cursor: pointer; color: var(--navy);
 }
 .persona-tab-btn.activo { background: var(--teal); color: white; border-color: var(--teal); }
 .persona-tab-btn.completo::after { content: " ✓"; color: var(--success); }
-.persona-panel { display: none; }
+/* Todos los paneles de persona se muestran siempre; las "tabs" de arriba
+   son solo anclas para saltar a la sección de esa persona, no interruptores
+   de mostrar/ocultar. Así nadie se pierde el formulario de un dependiente
+   por no saber que debía hacer clic. */
+.persona-panel {
+  display: block;
+  padding-top: 8px; margin-bottom: 22px; scroll-margin-top: 60px;
+}
+.persona-panel + .persona-panel { border-top: 2px solid var(--border); }
 .persona-panel-titulo {
   font-size: 14px; font-weight: 700; color: var(--white); background: var(--teal-dark);
-  padding: 8px 12px; border-radius: 8px; margin: 0 0 12px;
+  padding: 8px 12px; border-radius: 8px; margin: 12px 0 12px;
 }
-.persona-panel.activo { display: block; }
+.persona-panel.activo .persona-panel-titulo { background: var(--navy); }
 .pantalla { display: none; }
 .pantalla.activa { display: block; }
 button, .btn {
@@ -359,28 +370,48 @@ function irAPantalla(nombre) {
 }
 
 // ── Tabs por persona (declaración de salud y antecedentes) ──
-function construirTabs(contenedorId, prefijoPanel) {
+// Todos los paneles de persona ya están visibles en la pantalla (ver CSS).
+// Estos botones son solo accesos rápidos: al hacer clic, la página baja
+// (scroll) hasta el formulario de esa persona; no ocultan ni muestran nada.
+// Así el usuario ve de entrada que hay varios formularios por llenar
+// (uno por cada D1, D2, etc.) sin depender de adivinar dónde hacer clic.
+function construirTabs(contenedorId, prefijoPanel, prefijoPantalla) {
     const contenedor = document.getElementById(contenedorId);
     contenedor.innerHTML = "";
-    PERSONAS.forEach((p, i) => {
+    const botones = [];
+
+    PERSONAS.forEach((p) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "persona-tab-btn" + (i === 0 ? " activo" : "");
+        btn.className = "persona-tab-btn";
         btn.textContent = p.codigo === "T" ? "Titular" : p.codigo;
         btn.onclick = () => {
-            contenedor.querySelectorAll(".persona-tab-btn").forEach(b => b.classList.remove("activo"));
-            btn.classList.add("activo");
-            document.querySelectorAll(`#pantalla-${prefijoPanel === 'salud-' ? 'salud' : 'antecedentes'} .persona-panel`).forEach(pnl => pnl.classList.remove("activo"));
-            document.getElementById(prefijoPanel + p.codigo).classList.add("activo");
+            const panel = document.getElementById(prefijoPanel + p.codigo);
+            if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
         };
         contenedor.appendChild(btn);
+        botones.push({ codigo: p.codigo, btn });
     });
-    // Activar el primero
-    const primerPanel = document.getElementById(prefijoPanel + PERSONAS[0].codigo);
-    if (primerPanel) primerPanel.classList.add("activo");
+
+    // Resalta la pestaña de la persona cuyo panel está actualmente en pantalla,
+    // solo como referencia visual (no controla qué se ve).
+    const paneles = document.querySelectorAll(`#pantalla-${prefijoPantalla} .persona-panel`);
+    if (paneles.length && "IntersectionObserver" in window) {
+        const observer = new IntersectionObserver((entradas) => {
+            entradas.forEach(entrada => {
+                if (!entrada.isIntersecting) return;
+                const codigo = entrada.target.dataset.persona;
+                botones.forEach(({ codigo: c, btn }) => btn.classList.toggle("activo", c === codigo));
+                paneles.forEach(pnl => pnl.classList.toggle("activo", pnl === entrada.target));
+            });
+        }, { rootMargin: "-80px 0px -70% 0px", threshold: 0 });
+        paneles.forEach(pnl => observer.observe(pnl));
+    } else if (botones.length) {
+        botones[0].btn.classList.add("activo");
+    }
 }
-construirTabs("tabs-salud", "panel-salud-");
-construirTabs("tabs-antecedentes", "panel-ant-");
+construirTabs("tabs-salud", "panel-salud-", "salud");
+construirTabs("tabs-antecedentes", "panel-ant-", "antecedentes");
 
 
 // ── Documento de estado civil: UNO SOLO por tipo para toda la solicitud ──

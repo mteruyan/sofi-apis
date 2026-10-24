@@ -8,6 +8,7 @@
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="/static/mad_auth.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
@@ -312,6 +313,14 @@
     text-align:right;
   }
 
+  .novedades{ margin:14px 16px 0; background:#fff; border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px; }
+  .novedades h4{ margin:0 0 8px; font-size:12.5px; color:var(--muted); font-weight:600; letter-spacing:.02em; text-transform:uppercase; }
+  .nov-item{ display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:14px; line-height:1.35; }
+  .nov-item:first-of-type{ border-top:none; }
+  .nov-item .ic{ flex:0 0 auto; }
+  .nov-item .hr{ margin-left:auto; flex:0 0 auto; font-size:12px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+  .nov-item.nuevo{ background:#fff8e8; border-radius:10px; padding:8px; border-top:none; }
+  .prof-cmp{ display:block; font-size:12px; color:var(--muted); margin-top:2px; }
   footer{
     margin-top:auto;
     padding:22px 20px 28px;
@@ -327,6 +336,80 @@
   @media (prefers-reduced-motion: reduce){
     .eta-dot, .marker-provider::after{ animation:none; }
   }
+
+  /* ---------- búsqueda en curso: que se note que la pantalla está viva ---------- */
+  .marker-origin{ position:relative; }
+  body.buscando .marker-origin::after{
+    content:''; position:absolute; inset:-14px; border-radius:50%;
+    border:2px solid var(--pulse); opacity:.6; animation:ring 2s ease-out infinite;
+  }
+  body.buscando .marker-origin::before{
+    content:''; position:absolute; inset:-14px; border-radius:50%;
+    border:2px solid var(--pulse); opacity:.6; animation:ring 2s ease-out 1s infinite;
+  }
+  .busq{ margin-top:10px; }
+  .busq .barra{ height:4px; border-radius:4px; background:var(--mint); overflow:hidden; position:relative; }
+  .busq .barra i{ position:absolute; top:0; bottom:0; width:40%; border-radius:4px; background:var(--pulse);
+    animation:desliza 1.6s ease-in-out infinite; }
+  @keyframes desliza{ 0%{ left:-40%; } 100%{ left:100%; } }
+  .busq .busq-txt{ font-size:12.5px; color:var(--muted); margin-top:7px; min-height:34px; line-height:1.4; }
+  .busq .busq-txt b{ color:var(--ink); font-family:'JetBrains Mono',monospace; font-weight:500; }
+  .busq .busq-aviso{ color:var(--amber); }
+  @media (prefers-reduced-motion: reduce){
+    body.buscando .marker-origin::after, body.buscando .marker-origin::before, .busq .barra i{ animation:none; }
+  }
+
+  /* ---------- cancelar / cambiar médico / reprogramar ---------- */
+  .cancel-wrap{ margin:12px 20px 0; }
+  .btn-cancelar{
+    width:100%; padding:13px; border-radius:12px; background:#fff;
+    border:1.5px solid #e8c4c0; color:var(--danger); font-weight:600; font-size:14px; cursor:pointer;
+  }
+  .modal-fondo{
+    position:fixed; inset:0; background:rgba(16,34,31,.45); z-index:1000;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .modal{
+    background:#fff; width:100%; max-width:520px; border-radius:18px 18px 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  .modal h3{ font-family:'Fraunces',serif; font-weight:500; margin:0 0 12px; }
+  .motivo{
+    display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--line);
+    border-radius:10px; margin-bottom:8px; font-size:14px; cursor:pointer;
+  }
+  .motivo input{ accent-color:var(--teal-mid); }
+  .modal textarea{
+    width:100%; min-height:60px; border:1px solid var(--line); border-radius:10px; padding:10px;
+    font-family:inherit; font-size:14px; margin-top:4px; resize:vertical;
+  }
+  .modal-error{ color:var(--danger); font-size:12.5px; min-height:18px; margin-top:6px; }
+  .modal-botones{ display:flex; gap:10px; margin-top:8px; }
+  .modal-botones button{ flex:1; padding:13px; border-radius:10px; font-weight:600; font-size:14px; cursor:pointer; border:none; }
+  .btn-volver{ background:var(--mint); color:var(--teal-deep); }
+  .btn-confirmar{ background:var(--danger); color:#fff; }
+  .btn-confirmar:disabled{ opacity:.6; }
+  .alternativa{
+    background:var(--mint); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; margin:4px 0 10px; font-size:13.5px;
+  }
+  .alternativa p{ margin:0 0 10px; }
+  .btn-otro-medico{
+    width:100%; padding:12px; border:none; border-radius:10px;
+    background:var(--teal-mid); color:#fff; font-weight:600; font-size:14px; cursor:pointer;
+  }
+  .btn-otro-medico:disabled{ opacity:.6; }
+  .btn-reprog{ width:100%; padding:13px; border-radius:12px; background:#fff; border:1.5px solid var(--teal-mid);
+    color:var(--teal-mid); font-weight:600; font-size:14px; cursor:pointer; margin-bottom:8px; }
+  .modal.largo{ max-height:92vh; overflow-y:auto; }
+  .rp-campo{ margin:8px 0; }
+  .rp-campo label{ display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  .rp-campo input{ width:100%; padding:10px; border:1px solid var(--line); border-radius:10px; font-size:14px; font-family:inherit; }
+  .rp-fila{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #rpMapa{ height:200px; border-radius:12px; margin:6px 0; }
+  .pin-rp{ width:22px; height:22px; border-radius:50%; background:var(--danger); border:3px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  .btn-ok{ background:var(--teal-mid); color:#fff; }
+  .btn-mini{ border:1px solid var(--line); background:#fff; border-radius:8px; padding:7px 10px; font-size:12.5px; cursor:pointer; margin-right:6px; }
 </style>
 </head>
 <body>
@@ -364,13 +447,34 @@
     <div class="card-body">
       <div class="status-line" id="statusPrincipal">Buscando proveedor cercano</div>
       <div class="sub-line" id="statusSecundario">Esto puede tardar unos minutos</div>
+      <div class="busq" id="busqueda" style="display:none">
+        <div class="barra"><i></i></div>
+        <div class="busq-txt" id="busqTxt"></div>
+      </div>
     </div>
     <a class="call-btn" id="btnLlamar" href="#" style="display:none" aria-label="Llamar">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
     </a>
   </div>
 
+  <div class="cancel-wrap" id="cancelWrap" style="display:none">
+    <button class="btn-reprog" id="btnReprogramar" style="display:none">📅 Cambiar fecha, hora o lugar</button>
+    <button class="btn-cancelar" id="btnCancelar">Cancelar servicio</button>
+  </div>
+
+  <div class="novedades" id="boxNovedades" style="display:none">
+    <h4>Avisos de tu médico</h4>
+    <div id="listaNovedades"></div>
+  </div>
+
   <div class="detail">
+    <div class="detail-row" id="filaProfesional" style="display:none">
+      <div class="k">Profesional</div>
+      <div class="v"><span id="detProfesional">—</span><span class="prof-cmp" id="detCmp"></span><span class="prof-cmp" id="detEmpresa"></span></div>
+    </div>
+    <div class="detail-row" id="filaProgramada" style="display:none">
+      <div class="k">Programado para</div><div class="v" id="detProgramada">—</div>
+    </div>
     <div class="detail-row">
       <div class="k">Servicio</div>
       <div class="v" id="detTipo">—</div>
@@ -388,10 +492,58 @@
   <footer>
     <div class="help">
       ¿Necesitas ayuda con tu servicio?<br>
-      <a href="tel:+5116100100">Llamar a Central Sanitas</a>
+      <a href="tel:+5112191919">Llamar a Central Sanitas · 219-1919</a>
     </div>
   </footer>
 
+</div>
+
+<div class="modal-fondo" id="modalCancelar" style="display:none">
+  <div class="modal">
+    <h3>¿Por qué deseas cancelar?</h3>
+    <div id="listaMotivos"></div>
+    <div class="alternativa" id="altCambioMedico" style="display:none">
+      <p>¿Prefieres que te asignemos <b>otro médico</b> en lugar de cancelar?</p>
+      <button class="btn-otro-medico" id="btnOtroMedico">Sí, buscar otro médico</button>
+    </div>
+    <div class="alternativa" id="altReprogramar" style="display:none">
+      <p>¿Prefieres <b>cambiar la fecha, hora o lugar</b> en lugar de cancelar?</p>
+      <button class="btn-otro-medico" id="btnIrReprogramar">Sí, reprogramar</button>
+    </div>
+    <textarea id="comentarioCancelar" maxlength="300" placeholder="Cuéntanos más (opcional)"></textarea>
+    <div class="modal-error" id="errorCancelar"></div>
+    <div class="modal-botones">
+      <button class="btn-volver" id="btnVolver">Volver</button>
+      <button class="btn-confirmar" id="btnConfirmarCancelar">Cancelar servicio</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-fondo" id="modalReprog" style="display:none">
+  <div class="modal largo">
+    <h3>Cambiar fecha, hora o lugar</h3>
+    <div class="rp-campo"><label>Fecha y hora (hora de Lima)</label><input type="datetime-local" id="rpFecha"></div>
+    <div class="rp-campo"><label>Lugar: mueve el pin o toca el mapa</label>
+      <div id="rpMapa"></div>
+      <button class="btn-mini" id="rpMiUbicacion">📍 Usar mi ubicación actual</button>
+      <button class="btn-mini" id="rpRestablecer">↩️ Restablecer</button>
+    </div>
+    <div class="rp-campo"><label>Dirección exacta</label><input type="text" id="rpDireccion" maxlength="200"></div>
+    <div class="rp-fila">
+      <div class="rp-campo"><label>Distrito</label><input type="text" id="rpDistrito" maxlength="80"></div>
+      <div class="rp-campo"><label>Referencia (opcional)</label><input type="text" id="rpReferencia" maxlength="200"></div>
+    </div>
+    <div class="rp-fila">
+      <div class="rp-campo"><label>Contacto en el lugar (opcional)</label><input type="text" id="rpContactoNombre" maxlength="120"></div>
+      <div class="rp-campo"><label>Celular del contacto</label><input type="tel" id="rpContactoTel" inputmode="numeric"></div>
+    </div>
+    <p class="muted-rp" style="font-size:12.5px;color:var(--muted);margin:8px 0 0">Si cambias la fecha, la hora o el lugar, el profesional que ya aceptó se liberará y se buscará uno nuevo cerca de la nueva hora. Tus datos personales se usan solo para coordinar este servicio.</p>
+    <div class="modal-error" id="rpError"></div>
+    <div class="modal-botones">
+      <button class="btn-volver" id="rpVolver">Volver</button>
+      <button class="btn-ok" id="rpConfirmar">Guardar cambios</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -401,7 +553,6 @@
 const TRACKING_TOKEN = (location.pathname.split('/track/')[1] || '').replace(/\/$/, '');
 const API_ESTADO_URL = `/track/${TRACKING_TOKEN}/estado`;
 const POLL_INTERVAL_MS = 7000;
-const VELOCIDAD_PROMEDIO_KMH = 22; // heurística para estimar ETA en zona urbana
 
 /* Pasos de la máquina de estados (debe calzar con `solicitudes.estado`) */
 const PASOS = [
@@ -421,14 +572,17 @@ const TEXTOS_ESTADO = {
   en_atencion:        { badge: 'Atención',  principal: 'Atención en curso',           secundario: 'El servicio está siendo brindado' },
   finalizado:         { badge: 'Finalizado',principal: 'Servicio finalizado',         secundario: 'Gracias por confiar en Sanitas' },
   cancelado:          { badge: 'Cancelado', principal: 'Servicio cancelado',          secundario: 'Contáctanos si fue un error' },
+  sin_cobertura:      { badge: 'Sin cobertura', principal: 'No encontramos un profesional disponible', secundario: 'Un asesor te contactará' },
+  programada:         { badge: 'Programado', principal: 'Servicio programado', secundario: 'Te avisaremos cuando asignemos al profesional' },
 };
 
 /* =========================================================
    MAPA
    ========================================================= */
-const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-12.0464,-77.0428], 14);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19,
+const map = L.map('map', { zoomControl:false, attributionControl:true }).setView([-12.0464,-77.0428], 14);
+map.attributionControl.setPrefix(false);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap',
 }).addTo(map);
 
 const iconProvider = L.divIcon({ className:'', html:'<div class="marker-provider"></div>', iconSize:[22,22] });
@@ -455,65 +609,144 @@ async function consultarEstado(){
     const data = await res.json();
     render(data);
   }catch(err){
-    // Sin backend real conectado todavía: se muestra un recorrido simulado
-    // para poder revisar el diseño. Quitar renderDemo() al conectar la API.
-    renderDemo();
+    document.getElementById('badgeEstado').textContent = 'Sin conexión';
+    document.getElementById('statusSecundario').textContent = 'Reintentando…';
   }
 }
 
+const ESTADOS_CANCELABLES = ['programada', 'buscando_proveedor', 'asignado', 'en_camino'];
+let estadoActual = null;
+let puedeCambiarMedico = false;
+let datosTracking = null;
+let inicioBusqueda = null;      // instante en que se creó la solicitud (o en que esta página la vio buscando)
+let ultimaActMs = null;         // última respuesta correcta del servidor
+
+const MENSAJES_BUSQUEDA = [
+  'Contactando médicos cercanos a tu ubicación…',
+  'Esperando que un médico confirme el servicio…',
+  'Ampliando la zona de búsqueda si hace falta…',
+  'Esta pantalla se actualiza sola, no necesitas recargarla.',
+];
+
+function renderNovedades(lista){
+  const box = document.getElementById('boxNovedades'), cont = document.getElementById('listaNovedades');
+  box.style.display = lista.length ? 'block' : 'none';
+  cont.textContent = '';
+  lista.forEach((n, i) => {
+    const fila = document.createElement('div');
+    fila.className = 'nov-item' + (i === 0 ? ' nuevo' : '');
+    const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = n.icono || '💬';
+    const tx = document.createElement('span'); tx.textContent = n.texto;
+    const hr = document.createElement('span'); hr.className = 'hr';
+    hr.textContent = n.creado_en ? new Date(n.creado_en).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', timeZone:'America/Lima' }) : '';
+    fila.append(ic, tx, hr);
+    cont.appendChild(fila);
+  });
+}
+
 function render(data){
+  datosTracking = data;
+  ultimaActMs = Date.now();
+  const buscando = data.estado === 'buscando_proveedor';
+  document.body.classList.toggle('buscando', buscando);
+  document.getElementById('busqueda').style.display = buscando ? 'block' : 'none';
+  if (buscando) { if (!inicioBusqueda) inicioBusqueda = data.creado_en ? new Date(data.creado_en).getTime() : Date.now(); }
+  else inicioBusqueda = null;
+  actualizarReloj();
+  document.getElementById('btnReprogramar').style.display = data.puede_reprogramar ? 'block' : 'none';
+  estadoActual = data.estado;
+  puedeCambiarMedico = !!data.puede_cambiar_medico;
   const cfg = TEXTOS_ESTADO[data.estado] || TEXTOS_ESTADO.buscando_proveedor;
+  const nombre = data.proveedor_nombre;
 
   document.getElementById('tituloServicio').textContent =
     data.tipo_servicio === 'AMBULANCIA' ? 'Servicio de ambulancia' : 'Médico a domicilio';
   document.getElementById('badgeEstado').textContent = cfg.badge;
-  document.getElementById('statusPrincipal').textContent = cfg.principal;
-  document.getElementById('statusSecundario').textContent = cfg.secundario;
   document.getElementById('detTipo').textContent = data.tipo_servicio === 'AMBULANCIA' ? 'Ambulancia' : 'MAD';
-  document.getElementById('detUltimaAct').textContent = new Date().toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
-
-  if (data.proveedor_nombre){
-    document.getElementById('avatarIniciales').textContent = iniciales(data.proveedor_nombre);
-  }
 
   renderRail(data.estado);
 
+  // Origen (domicilio del cliente)
   if (data.origen){
     origenCoords = [data.origen.lat, data.origen.lng];
-    if (!markerOrigin){
-      markerOrigin = L.marker(origenCoords, { icon: iconOrigin }).addTo(map);
-    } else {
-      markerOrigin.setLatLng(origenCoords);
-    }
-    document.getElementById('detOrigen').textContent = `${data.origen.lat.toFixed(5)}, ${data.origen.lng.toFixed(5)}`;
+    if (!markerOrigin) markerOrigin = L.marker(origenCoords, { icon: iconOrigin }).addTo(map);
+    else markerOrigin.setLatLng(origenCoords);
+    document.getElementById('detOrigen').textContent = data.direccion
+      ? `${data.direccion}${data.distrito ? ', ' + data.distrito : ''}`
+      : `${data.origen.lat.toFixed(5)}, ${data.origen.lng.toFixed(5)}`;
   }
 
-  if (data.proveedor_ubicacion){
+  // Proveedor en el mapa (solo si hay uno asignado)
+  const hayProveedor = data.proveedor_ubicacion && ['asignado','en_camino','llego','en_atencion'].includes(data.estado);
+  if (hayProveedor){
     const pos = [data.proveedor_ubicacion.lat, data.proveedor_ubicacion.lng];
-    if (!markerProvider){
-      markerProvider = L.marker(pos, { icon: iconProvider }).addTo(map);
-    } else {
-      markerProvider.setLatLng(pos);
-    }
+    if (!markerProvider) markerProvider = L.marker(pos, { icon: iconProvider }).addTo(map);
+    else markerProvider.setLatLng(pos);
     actualizarLinea(pos, origenCoords);
-    actualizarETA(pos, origenCoords);
-    ultimaPosProveedor = pos;
-    document.getElementById('btnLlamar').style.display = 'flex';
-
     if (!map._boundsFitOnce){
       const puntos = [pos, origenCoords].filter(Boolean);
       if (puntos.length) map.fitBounds(L.latLngBounds(puntos), { padding:[50,70] });
       map._boundsFitOnce = true;
     }
   } else {
-    document.getElementById('etaTexto').textContent = cfg.badge;
+    // Sin proveedor (buscando, o se pidió otro médico): limpiar el anterior del mapa
+    if (markerProvider){ map.removeLayer(markerProvider); markerProvider = null; }
+    if (routeLine){ map.removeLayer(routeLine); routeLine = null; }
+    map._boundsFitOnce = false;
+    if (origenCoords && !map._origenCentrado){ map.setView(origenCoords, 15); map._origenCentrado = true; }
   }
+
+  // ETA calculado por el servidor
+  const etaMin = data.eta_min ?? null;
+  document.getElementById('etaTexto').textContent =
+    etaMin != null ? `~${etaMin} min · ${data.distancia_km} km` : cfg.badge;
+
+  // Textos con el nombre del médico y el tiempo estimado
+  let principal = cfg.principal, secundario = cfg.secundario;
+  if (nombre && hayProveedor){
+    document.getElementById('avatarIniciales').textContent = iniciales(nombre);
+    if (data.estado === 'asignado')    principal = `${nombre} tomó tu servicio`;
+    if (data.estado === 'en_camino')   principal = `${nombre} va en camino`;
+    if (data.estado === 'llego')       principal = `${nombre} llegó a tu domicilio`;
+    if (data.estado === 'en_atencion') principal = `Atención en curso con ${nombre}`;
+  } else {
+    document.getElementById('avatarIniciales').textContent = '—';
+  }
+  if (data.estado === 'buscando_proveedor' && data.cambios_medico > 0){
+    principal = 'Buscando otro médico para ti';
+  }
+  if (['asignado','en_camino'].includes(data.estado) && etaMin != null){
+    secundario = `Llegada estimada: ~${etaMin} min`;
+  }
+  if (data.programada_para){
+    const cuando = fmtProgramada(data.programada_para);
+    document.getElementById('filaProgramada').style.display = 'flex';
+    document.getElementById('detProgramada').textContent = cuando;
+    if (data.estado === 'programada'){ principal = 'Servicio programado'; secundario = cuando; }
+  } else {
+    document.getElementById('filaProgramada').style.display = 'none';
+  }
+  document.getElementById('statusPrincipal').textContent = principal;
+  document.getElementById('statusSecundario').textContent = secundario;
+
+  // Datos del profesional (nombre, CMP y empresa) y avisos que envía durante el servicio
+  const hayDoc = !!(nombre && ['asignado','en_camino','llego','en_atencion'].includes(data.estado));
+  document.getElementById('filaProfesional').style.display = hayDoc ? 'flex' : 'none';
+  if (hayDoc){
+    document.getElementById('detProfesional').textContent = nombre;
+    document.getElementById('detCmp').textContent = data.proveedor_cmp ? `CMP ${data.proveedor_cmp}` : '';
+    document.getElementById('detEmpresa').textContent = data.proveedor_empresa ? `Empresa: ${data.proveedor_empresa}` : '';
+  }
+  renderNovedades(hayDoc ? (data.novedades || []) : []);
+
+  document.getElementById('cancelWrap').style.display =
+    ESTADOS_CANCELABLES.includes(data.estado) ? 'block' : 'none';
 }
 
 function renderRail(estadoActual){
   const rail = document.getElementById('rail');
   rail.innerHTML = '';
-  const idxActual = PASOS.findIndex(p => p.key === estadoActual);
+  const idxActual = PASOS.findIndex(p => p.key === (estadoActual === 'programada' ? 'buscando_proveedor' : estadoActual));
   PASOS.forEach((paso, i) => {
     const el = document.createElement('div');
     el.className = 'rail-step' + (i < idxActual ? ' done' : i === idxActual ? ' active' : '');
@@ -530,50 +763,216 @@ function actualizarLinea(posProveedor, posOrigen){
   }).addTo(map);
 }
 
-function actualizarETA(posProveedor, posOrigen){
-  if (!posOrigen) return;
-  const distKm = distanciaKm(posProveedor[0], posProveedor[1], posOrigen[0], posOrigen[1]);
-  const minutos = Math.max(1, Math.round((distKm / VELOCIDAD_PROMEDIO_KMH) * 60));
-  document.getElementById('etaTexto').textContent = `~${minutos} min · ${distKm.toFixed(1)} km`;
-}
-
-function distanciaKm(lat1, lon1, lat2, lon2){
-  const R = 6371;
-  const dLat = (lat2-lat1) * Math.PI/180;
-  const dLon = (lon2-lon1) * Math.PI/180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
 function iniciales(nombre){
   return nombre.split(' ').filter(Boolean).slice(0,2).map(p => p[0].toUpperCase()).join('');
 }
 
 /* =========================================================
-   MODO DEMO — solo para previsualizar el diseño sin backend
+   RELOJ EN VIVO (cada segundo): tiempo de espera, mensajes rotativos y "actualizado hace…"
    ========================================================= */
-let demoStep = 0;
-const demoOrigen = { lat:-12.0900, lng:-77.0370 };
-let demoProveedor = { lat:-12.1010, lng:-77.0300 };
-const demoEstados = ['buscando_proveedor','asignado','en_camino','en_camino','en_camino','llego','en_atencion'];
-
-function renderDemo(){
-  if (demoStep < demoEstados.length - 1 && Math.random() > .55) demoStep++;
-  const estado = demoEstados[demoStep];
-
-  if (estado === 'en_camino'){
-    demoProveedor.lat += (demoOrigen.lat - demoProveedor.lat) * 0.18;
-    demoProveedor.lng += (demoOrigen.lng - demoProveedor.lng) * 0.18;
+function actualizarReloj(){
+  if (ultimaActMs){
+    const s = Math.max(0, Math.round((Date.now() - ultimaActMs) / 1000));
+    document.getElementById('detUltimaAct').textContent = s < 5 ? 'ahora mismo' : `hace ${s} s`;
   }
-
-  render({
-    estado,
-    tipo_servicio: 'MAD',
-    proveedor_nombre: 'Dr. Carlos Mendoza',
-    origen: demoOrigen,
-    proveedor_ubicacion: estado === 'buscando_proveedor' ? null : demoProveedor,
-  });
+  if (inicioBusqueda){
+    const t = Math.max(0, Math.round((Date.now() - inicioBusqueda) / 1000));
+    const mmss = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    const msg = MENSAJES_BUSQUEDA[Math.floor(t / 5) % MENSAJES_BUSQUEDA.length];
+    const tarde = t > 300
+      ? '<br><span class="busq-aviso">Está tardando más de lo normal. Si es urgente, llama a la Central al <a href="tel:+5112191919">219-1919</a>.</span>' : '';
+    document.getElementById('busqTxt').innerHTML = `Buscando hace <b>${mmss}</b> · ${msg}${tarde}`;
+  }
 }
+setInterval(actualizarReloj, 1000);
+
+/* =========================================================
+   CANCELACIÓN / CAMBIO DE MÉDICO
+   ========================================================= */
+const MOTIVOS = [
+  { codigo:'demora',         texto:'Tardará mucho en llegar',              estados:['buscando_proveedor','asignado','en_camino'] },
+  { codigo:'medico',         texto:'No quiero que me atienda este médico', estados:['asignado','en_camino'] },
+  { codigo:'reprogramar',    texto:'Necesito cambiar la fecha, hora o lugar', estados:ESTADOS_CANCELABLES },
+  { codigo:'ya_no_necesito', texto:'Ya no necesito el servicio',           estados:ESTADOS_CANCELABLES },
+  { codigo:'otro_lugar',     texto:'Me atendí en otro lugar',              estados:ESTADOS_CANCELABLES },
+  { codigo:'error',          texto:'Lo solicité por error',                estados:ESTADOS_CANCELABLES },
+  { codigo:'otro',           texto:'Otro motivo',                          estados:ESTADOS_CANCELABLES },
+];
+
+document.getElementById('btnCancelar').onclick = () => {
+  const lista = document.getElementById('listaMotivos');
+  lista.innerHTML = '';
+  MOTIVOS.filter(m => m.estados.includes(estadoActual)).forEach(m => {
+    const label = document.createElement('label');
+    label.className = 'motivo';
+    label.innerHTML = `<input type="radio" name="motivo" value="${m.codigo}"><span></span>`;
+    label.querySelector('span').textContent = m.texto;
+    lista.appendChild(label);
+  });
+  document.getElementById('altCambioMedico').style.display = 'none';
+  document.getElementById('altReprogramar').style.display = 'none';
+  document.getElementById('comentarioCancelar').value = '';
+  document.getElementById('errorCancelar').textContent = '';
+  document.getElementById('modalCancelar').style.display = 'flex';
+};
+
+document.getElementById('btnVolver').onclick = () => {
+  document.getElementById('modalCancelar').style.display = 'none';
+};
+
+document.getElementById('listaMotivos').addEventListener('change', (e) => {
+  document.getElementById('altCambioMedico').style.display =
+    (e.target.value === 'medico' && puedeCambiarMedico) ? 'block' : 'none';
+  document.getElementById('altReprogramar').style.display =
+    (e.target.value === 'reprogramar' && datosTracking && datosTracking.puede_reprogramar) ? 'block' : 'none';
+});
+
+document.getElementById('btnOtroMedico').onclick = async () => {
+  const btn = document.getElementById('btnOtroMedico');
+  const error = document.getElementById('errorCancelar');
+  btn.disabled = true; btn.textContent = 'Buscando otro médico…';
+  try{
+    const res = await fetch(`/track/${TRACKING_TOKEN}/cambiar-medico`, { method:'POST' });
+    const data = await res.json();
+    if (!res.ok){ error.textContent = data.error || 'No se pudo cambiar de médico'; return; }
+    document.getElementById('modalCancelar').style.display = 'none';
+    consultarEstado();
+  }catch(e){
+    error.textContent = 'Error de conexión, intenta nuevamente';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Sí, buscar otro médico';
+  }
+};
+
+document.getElementById('btnConfirmarCancelar').onclick = async () => {
+  const elegido = document.querySelector('input[name="motivo"]:checked');
+  const comentario = document.getElementById('comentarioCancelar').value.trim();
+  const error = document.getElementById('errorCancelar');
+
+  if (!elegido){ error.textContent = 'Selecciona un motivo'; return; }
+  if (elegido.value === 'otro' && !comentario){ error.textContent = 'Cuéntanos brevemente el motivo'; return; }
+
+  const btn = document.getElementById('btnConfirmarCancelar');
+  btn.disabled = true; btn.textContent = 'Cancelando…';
+  try{
+    const res = await fetch(`/track/${TRACKING_TOKEN}/cancelar`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ motivo: elegido.value, comentario })
+    });
+    const data = await res.json();
+    if (!res.ok){ error.textContent = data.error || 'No se pudo cancelar'; return; }
+    document.getElementById('modalCancelar').style.display = 'none';
+    consultarEstado();
+  }catch(e){
+    error.textContent = 'Error de conexión, intenta nuevamente';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Cancelar servicio';
+  }
+};
+
+/* =========================================================
+   REPROGRAMAR
+   ========================================================= */
+let rpMap = null, rpMarker = null, rpOrigen = null;
+
+const limaFmt = new Intl.DateTimeFormat('sv-SE', { timeZone:'America/Lima', year:'numeric', month:'2-digit',
+  day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' });
+const aInputLima = d => limaFmt.format(d).replace(' ', 'T');       // 'AAAA-MM-DDTHH:MM' en hora de Lima
+
+function rpDistM(a, b){
+  const R = 6371000, r = x => x * Math.PI / 180;
+  const dLat = r(b[0] - a[0]), dLng = r(b[1] - a[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function iniciarMapaRp(){
+  if (!rpMap){
+    rpMap = L.map('rpMapa');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(rpMap);
+    rpMarker = L.marker(rpOrigen, { draggable:true,
+      icon: L.divIcon({ className:'', html:'<div class="pin-rp"></div>', iconSize:[22, 22], iconAnchor:[11, 11] }) }).addTo(rpMap);
+    rpMap.on('click', e => rpMarker.setLatLng(e.latlng));
+  }
+  rpMarker.setLatLng(rpOrigen);
+  rpMap.setView(rpOrigen, 16);
+  rpMap.invalidateSize();
+}
+
+function abrirReprogramar(){
+  const d = datosTracking;
+  if (!d || !d.puede_reprogramar) return;
+  rpOrigen = [d.origen.lat, d.origen.lng];
+  const f = document.getElementById('rpFecha');
+  f.value = aInputLima(new Date(d.programada_para));
+  f.min = aInputLima(new Date(Date.now() + 60 * 60000));
+  f.max = aInputLima(new Date(Date.now() + 14 * 24 * 3600000));
+  document.getElementById('rpDireccion').value = d.direccion || '';
+  document.getElementById('rpDistrito').value = d.distrito || '';
+  document.getElementById('rpReferencia').value = d.referencia || '';
+  document.getElementById('rpContactoNombre').value = d.contacto_nombre || '';
+  document.getElementById('rpContactoTel').value = d.contacto_telefono ? String(d.contacto_telefono).replace(/^51/, '') : '';
+  document.getElementById('rpError').textContent = '';
+  document.getElementById('modalReprog').style.display = 'flex';
+  setTimeout(iniciarMapaRp, 60);
+}
+
+document.getElementById('btnReprogramar').onclick = abrirReprogramar;
+document.getElementById('btnIrReprogramar').onclick = () => {
+  document.getElementById('modalCancelar').style.display = 'none';
+  abrirReprogramar();
+};
+document.getElementById('rpVolver').onclick = () => { document.getElementById('modalReprog').style.display = 'none'; };
+document.getElementById('rpRestablecer').onclick = () => { if (rpMarker){ rpMarker.setLatLng(rpOrigen); rpMap.setView(rpOrigen, 16); } };
+document.getElementById('rpMiUbicacion').onclick = () => {
+  const err = document.getElementById('rpError');
+  if (!navigator.geolocation){ err.textContent = 'Tu navegador no permite obtener la ubicación'; return; }
+  navigator.geolocation.getCurrentPosition(
+    p => { const ll = [p.coords.latitude, p.coords.longitude]; rpMarker.setLatLng(ll); rpMap.setView(ll, 17); err.textContent = ''; },
+    () => { err.textContent = 'No se pudo obtener tu ubicación. Mueve el pin manualmente.'; },
+    { enableHighAccuracy:true, timeout:10000 });
+};
+
+document.getElementById('rpConfirmar').onclick = async () => {
+  const d = datosTracking, err = document.getElementById('rpError');
+  const fecha = document.getElementById('rpFecha').value;
+  const direccion = document.getElementById('rpDireccion').value.trim();
+  const distrito = document.getElementById('rpDistrito').value.trim();
+  if (!fecha){ err.textContent = 'Elige la fecha y la hora'; return; }
+  if (direccion.length < 5 || !distrito){ err.textContent = 'Escribe la dirección exacta y el distrito'; return; }
+
+  const pos = rpMarker.getLatLng();
+  const cambioImportante =
+    fecha !== aInputLima(new Date(d.programada_para)) ||
+    rpDistM(rpOrigen, [pos.lat, pos.lng]) > 150 ||
+    distrito.toUpperCase() !== (d.distrito || '').toUpperCase();
+  if (d.estado === 'asignado' && cambioImportante &&
+      !confirm('El profesional ya aceptó este servicio. Si cambias la fecha, la hora o el lugar, se liberará y se buscará otro cerca de la nueva hora. ¿Continuar?')) return;
+
+  const btn = document.getElementById('rpConfirmar');
+  btn.disabled = true; btn.textContent = 'Guardando…'; err.textContent = '';
+  try{
+    const res = await fetch(`/track/${TRACKING_TOKEN}/reprogramar`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        programada_para: fecha, lat: pos.lat, lng: pos.lng, direccion, distrito,
+        referencia: document.getElementById('rpReferencia').value,
+        contacto_nombre: document.getElementById('rpContactoNombre').value,
+        contacto_telefono: document.getElementById('rpContactoTel').value,
+      })
+    });
+    const data = await res.json();
+    if (!res.ok){ err.textContent = data.error || 'No se pudo guardar'; return; }
+    document.getElementById('modalReprog').style.display = 'none';
+    map._boundsFitOnce = false;
+    consultarEstado();
+  }catch(e){
+    err.textContent = 'Error de conexión, intenta nuevamente';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Guardar cambios';
+  }
+};
 
 /* =========================================================
    INICIO

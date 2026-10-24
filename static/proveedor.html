@@ -6,8 +6,18 @@
 <title>Panel de Proveedor — Sanitas</title>
 <meta name="robots" content="noindex, nofollow">
 
+<link rel="manifest" href="/proveedor.webmanifest">
+<meta name="theme-color" content="#003876">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sanitas MAD">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/static/pwa/proveedor-180.png">
+
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/static/mad_auth.js"></script>
 
 <style>
   :root{
@@ -32,32 +42,6 @@
   }
 
   .shell{ max-width:480px; margin:0 auto; min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
-
-  /* ---------- pantalla de acceso ---------- */
-  #pantallaAcceso{
-    flex:1; display:flex; align-items:center; justify-content:center; padding:24px;
-  }
-  .login-card{
-    background:#fff; border-radius:14px; padding:28px 24px; width:100%;
-    box-shadow:0 2px 14px rgba(0,56,118,.1); text-align:center;
-  }
-  .login-card .logo-mark{
-    width:52px; height:52px; border-radius:14px; margin:0 auto 14px;
-    background:linear-gradient(135deg,var(--azul),var(--teal-dark));
-    display:flex; align-items:center; justify-content:center; color:#fff;
-    font-weight:700; font-size:20px;
-  }
-  .login-card h1{ font-size:18px; margin:0 0 4px; color:var(--azul); }
-  .login-card p{ font-size:13px; color:var(--texto-mute); margin:0 0 18px; }
-  .login-card input{
-    width:100%; padding:12px 14px; border:1px solid var(--borde); border-radius:8px;
-    font-size:16px; margin-bottom:12px; text-align:center; letter-spacing:.5px;
-  }
-  .login-card button{
-    width:100%; padding:13px; background:var(--azul-claro); color:#fff; border:none;
-    border-radius:8px; font-size:15px; font-weight:700; cursor:pointer;
-  }
-  .login-error{ color:var(--rojo); font-size:12px; margin-top:10px; min-height:16px; }
 
   /* ---------- header ---------- */
   header{
@@ -130,6 +114,7 @@
   .btn-rechazar{ background:#fff; color:var(--rojo); border:1.5px solid #f0c2bb; }
   .btn-aceptar{ background:var(--verde); color:#fff; }
   .btn-rechazar:active, .btn-aceptar:active{ transform:scale(.97); }
+  .btn-rechazar:disabled, .btn-aceptar:disabled{ opacity:.5; cursor:not-allowed; }
 
   /* ---------- tarjeta de servicio activo ---------- */
   .servicio-card .top-row{
@@ -146,10 +131,12 @@
     font-size:15px; font-weight:600; color:var(--azul); margin-bottom:2px;
   }
   .servicio-card .telefono-cliente{
-    font-size:12.5px; color:var(--texto-mute); margin-bottom:14px;
+    font-size:12.5px; color:var(--texto-mute); margin-bottom:8px;
   }
 
-  #mapaServicio{ width:100%; height:180px; border-radius:10px; margin-bottom:14px; background:var(--gris); }
+  #mapaEspera{ width:100%; height:300px; border-radius:10px; background:var(--gris); }
+  .espera-txt{ font-size:13px; color:var(--texto-mute); text-align:center; margin-top:8px; }
+  #mapaServicio{ width:100%; height:180px; border-radius:10px; margin:6px 0 14px; background:var(--gris); }
 
   .botones-accion{ display:flex; gap:10px; }
   .btn-llamar{
@@ -167,25 +154,38 @@
   /* ---------- footer/help ---------- */
   .ayuda{ text-align:center; margin-top:20px; }
   .ayuda a{ color:var(--azul-claro); font-size:12.5px; text-decoration:none; }
+
+  /* ---------- mis servicios ---------- */
+  .resumen{ display:flex; gap:14px; align-items:center; justify-content:space-between; }
+  .resumen .k{ font-size:11px; color:var(--texto-mute); text-transform:uppercase; letter-spacing:.04em; }
+  .resumen .n{ font-size:26px; font-weight:700; color:var(--azul); line-height:1.1; }
+  .btn-hist{ background:var(--azul-claro); color:#fff; border:none; border-radius:9px; padding:10px 12px; font-weight:700; font-size:13px; cursor:pointer; }
+  .btn-informar{ width:100%; margin-top:10px; background:#fff; color:var(--azul); border:1.5px solid var(--azul-claro); border-radius:10px; padding:12px; font-weight:700; font-size:14px; cursor:pointer; }
+  .datos-clinicos{ margin-top:10px; background:#fff8e8; border:1px solid #f0d9a4; border-radius:10px; padding:10px 12px; font-size:13.5px; line-height:1.4; }
+  .datos-clinicos b{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#8a6410; margin-top:6px; }
+  .datos-clinicos b:first-child{ margin-top:0; }
+  .datos-clinicos .alergia{ color:var(--rojo); font-weight:700; }
+  .opc-aviso{ display:block; width:100%; text-align:left; border:1px solid var(--borde); background:#fff; border-radius:10px; padding:12px; margin-top:8px; font-size:14px; cursor:pointer; }
+  .opc-aviso.sel{ border-color:var(--azul-claro); background:#eaf2fc; font-weight:700; }
+  #avisoTexto{ width:100%; box-sizing:border-box; margin-top:8px; padding:10px; border:1px solid var(--borde); border-radius:8px; font-size:14px; font-family:inherit; }
+  .modal-fondo{ position:fixed; inset:0; background:rgba(0,56,118,.45); z-index:1000; display:none; align-items:flex-end; justify-content:center; }
+  .modal-hist{ background:#fff; width:100%; max-width:480px; max-height:92vh; overflow-y:auto; border-radius:16px 16px 0 0; padding:18px; }
+  .fila-fechas{ display:flex; gap:8px; margin:10px 0; }
+  .fila-fechas input{ flex:1; padding:9px; border:1px solid var(--borde); border-radius:8px; font-size:14px; min-width:0; }
+  .chips{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .chips button{ border:1px solid var(--borde); background:#fff; border-radius:999px; padding:6px 12px; font-size:12.5px; cursor:pointer; }
+  table.hist{ width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  table.hist th, table.hist td{ padding:7px 6px; border-bottom:1px solid var(--borde); text-align:left; }
+  .totales{ display:flex; gap:10px; margin:10px 0; }
+  .totales div{ flex:1; background:var(--gris); border-radius:10px; padding:10px; text-align:center; }
+  .totales b{ display:block; font-size:22px; color:var(--azul); }
 </style>
 </head>
 <body>
 
 <div class="shell">
 
-  <!-- ==================== PANTALLA DE ACCESO ==================== -->
-  <div id="pantallaAcceso">
-    <div class="login-card">
-      <div class="logo-mark">S</div>
-      <h1>Panel de Proveedor</h1>
-      <p>Ingresa tu código de proveedor para comenzar tu turno</p>
-      <input type="text" id="inputProveedorId" placeholder="Código de proveedor" inputmode="numeric">
-      <button id="btnEntrar">Ingresar</button>
-      <div class="login-error" id="loginError"></div>
-    </div>
-  </div>
-
-  <!-- ==================== APP PRINCIPAL ==================== -->
+  <!-- El acceso (usuario + clave + Google Authenticator) lo dibuja mad_auth.js -->
   <div id="appPrincipal" style="display:none; flex:1; flex-direction:column;">
     <header>
       <div class="quien">
@@ -195,10 +195,28 @@
       <div class="switch-disp">
         <span class="etiqueta off" id="etiquetaDisp">Desconectado</span>
         <button class="toggle" id="toggleDisponible" aria-label="Disponibilidad"></button>
+        <button id="btnSalir" style="margin-left:8px;background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer">Salir</button>
       </div>
     </header>
 
     <main>
+      <div id="cardInstalar" class="card" style="display:none">
+        <b>📲 Instala la app</b>
+        <p id="txtInstalar" style="font-size:13px;color:var(--texto-mute);margin:6px 0 10px"></p>
+        <button id="btnInstalar" class="btn-hist" style="display:none">Instalar</button>
+      </div>
+      <div id="cardAvisos" class="card" style="display:none">
+        <b>🔔 Avisos de nuevas solicitudes</b>
+        <p id="txtAvisos" style="font-size:13px;color:var(--texto-mute);margin:6px 0 10px"></p>
+        <button id="btnAvisos" class="btn-hist" style="display:none"></button>
+      </div>
+      <div id="avisoUbic" style="display:none;background:#fdecea;color:#c0392b;border:1px solid #f0c2bb;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px"></div>
+
+      <div id="avisoVersion" style="display:none;background:#e6f7f8;border:1px solid var(--teal);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+        🔄 Hay una versión nueva de la app.
+        <button class="btn-hist" id="btnActualizarApp" style="margin-left:6px;padding:6px 10px">Actualizar ahora</button>
+      </div>
+
       <div class="estado-conexion">
         <span class="dot-conexion" id="dotConexion"></span>
         <span id="textoConexion">Sincronizado</span>
@@ -206,22 +224,72 @@
 
       <div id="contenedorDinamico"></div>
 
+      <div class="card resumen">
+        <div><div class="k">Hoy</div><div class="n" id="rHoy">–</div></div>
+        <div><div class="k">Este mes</div><div class="n" id="rMes">–</div></div>
+        <button class="btn-hist" id="btnHistorial">📊 Ver historial</button>
+      </div>
+
       <div class="ayuda">
-        <a href="tel:+5116100100">¿Problemas? Llamar a Central Sanitas</a>
+        <a href="tel:+5112191919">¿Problemas? Llamar a Central Sanitas · 219-1919</a>
+      </div>
+      <div class="ayuda" style="margin-top:12px">
+        <button class="btn-hist" id="btnRecargar" style="background:#fff;color:var(--azul-claro);border:1px solid var(--borde)">🔄 Actualizar app</button>
+        <div style="font-size:11px;color:var(--texto-mute);margin-top:6px">Versión <span id="txtVersion"></span></div>
+      </div>
+      <div class="ayuda" style="margin-top:8px">
+        <span style="font-size:11.5px;color:var(--texto-mute)">📍 Mientras estés conectado, Sanitas y tu empresa (si perteneces a una) pueden ver tu ubicación para coordinar los servicios. Al desconectarte, deja de compartirse.</span>
       </div>
     </main>
   </div>
 
 </div>
 
+<div class="modal-fondo" id="modalAviso">
+  <div class="modal-hist">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b style="font-size:16px;color:var(--azul)">Informar al cliente</b>
+      <button id="btnCerrarAviso" style="border:none;background:none;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--texto-mute);margin-top:4px">Lo verán el cliente en su seguimiento y el monitor de Sanitas.</div>
+    <div id="opcionesAviso"></div>
+    <textarea id="avisoTexto" rows="2" maxlength="140" placeholder="Mensaje (opcional, máx. 140 caracteres)"></textarea>
+    <div id="avisoError" style="color:var(--rojo);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn-avanzar" id="btnEnviarAviso" style="width:100%;margin-top:8px">Enviar aviso</button>
+  </div>
+</div>
+
+<div class="modal-fondo" id="modalHist">
+  <div class="modal-hist">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b style="font-size:16px;color:var(--azul)">Mis servicios</b>
+      <button id="btnCerrarHist" style="border:none;background:none;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div class="chips">
+      <button data-r="hoy">Hoy</button><button data-r="mes">Este mes</button><button data-r="mesant">Mes anterior</button>
+    </div>
+    <div class="fila-fechas">
+      <input type="date" id="hDesde"><input type="date" id="hHasta">
+      <button class="btn-hist" id="btnConsultarHist">Ver</button>
+    </div>
+    <div class="totales">
+      <div><b id="hTotal">0</b>Total</div><div><b id="hMad">0</b>Médico</div><div><b id="hAmb">0</b>Ambulancia</div>
+    </div>
+    <b style="font-size:13px">Por día</b>
+    <table class="hist"><tbody id="hDias"></tbody></table>
+    <b style="font-size:13px;display:block;margin-top:12px">Detalle</b>
+    <table class="hist"><tbody id="hDetalle"></tbody></table>
+  </div>
+</div>
+
 <script>
 /* =========================================================
    CONFIG
    ========================================================= */
-const API_BASE = window.location.origin; // ajustar si el dominio del panel difiere del backend
+const API_BASE = window.location.origin;
+const APP_VERSION = "2026-10-23.1";          // debe coincidir con MAD_APP_VERSION de main_mad.py
 const POLL_INTERVAL_MS = 8000;
-const UBICACION_INTERVAL_ACTIVO_MS = 10000;   // con servicio asignado: cada 10s
-const UBICACION_INTERVAL_DISPONIBLE_MS = 45000; // solo disponible, sin servicio: cada 45s
+const UBICACION_INTERVAL_ACTIVO_MS = 10000;   // mientras está disponible: cada 10 s
 
 let proveedorId = null;
 let watchId = null;
@@ -230,8 +298,9 @@ let intervaloUbicacion = null;
 let mapaServicio = null;
 let markerCliente = null;
 let markerProveedor = null;
+let autodesconexionMin = 45;
+let ultimaFirma = null;     // evita redibujar (y parpadear) si no cambió nada
 
-const PASOS_ORDEN = ["asignado", "en_camino", "llego", "en_atencion", "finalizado"];
 const PASO_SIGUIENTE = {
   asignado: { estado: "en_camino", label: "Marcar: Salí en camino" },
   en_camino: { estado: "llego", label: "Marcar: Llegué al domicilio" },
@@ -245,24 +314,10 @@ const PASO_LABEL = {
   en_atencion: "Atención en curso",
 };
 
-/* =========================================================
-   LOGIN
-   ========================================================= */
-document.getElementById("btnEntrar").addEventListener("click", intentarIngresar);
-document.getElementById("inputProveedorId").addEventListener("keydown", e => {
-  if (e.key === "Enter") intentarIngresar();
-});
-
-function intentarIngresar() {
-  const valor = document.getElementById("inputProveedorId").value.trim();
-  if (!valor) {
-    document.getElementById("loginError").textContent = "Ingresa tu código de proveedor";
-    return;
-  }
-  proveedorId = valor;
-  document.getElementById("pantallaAcceso").style.display = "none";
-  document.getElementById("appPrincipal").style.display = "flex";
-  iniciarApp();
+/* Todo texto que escribe el cliente se escapa antes de mostrarlo */
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 /* =========================================================
@@ -273,7 +328,7 @@ let disponible = false;
 document.getElementById("toggleDisponible").addEventListener("click", async () => {
   const nuevoEstado = disponible ? "desconectado" : "disponible";
   try {
-    const res = await fetch(`${API_BASE}/proveedores/${proveedorId}/disponibilidad`, {
+    const res = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/disponibilidad`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ estado: nuevoEstado }),
@@ -281,24 +336,33 @@ document.getElementById("toggleDisponible").addEventListener("click", async () =
     if (!res.ok) throw new Error("No se pudo actualizar");
     aplicarDisponibilidad(nuevoEstado === "disponible");
     gestionarEnvioUbicacion();
+    if (nuevoEstado === "disponible") enviarUbicacionActual();   // primera posición ya, sin esperar el intervalo
   } catch (e) {
     marcarConexion(false);
   }
 });
 
 function aplicarDisponibilidad(activo) {
+  const cambio = disponible !== activo;
   disponible = activo;
   const toggle = document.getElementById("toggleDisponible");
   const etiqueta = document.getElementById("etiquetaDisp");
   toggle.classList.toggle("activo", activo);
   etiqueta.textContent = activo ? "Disponible" : "Desconectado";
   etiqueta.className = "etiqueta " + (activo ? "on" : "off");
+  if (cambio) {
+    gestionarEnvioUbicacion();
+    activo ? pedirWakeLock() : soltarWakeLock();
+    actualizarAvisos();
+  }
 }
 
 /* =========================================================
    POLLING DE ESTADO
    ========================================================= */
 function iniciarApp() {
+  sincronizarPush(false);
+  cargarResumenRapido();
   consultarEstadoActual();
   setInterval(consultarEstadoActual, POLL_INTERVAL_MS);
   iniciarGeolocalizacion();
@@ -306,10 +370,12 @@ function iniciarApp() {
 
 async function consultarEstadoActual() {
   try {
-    const res = await fetch(`${API_BASE}/proveedores/${proveedorId}/estado-actual`);
+    const res = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/estado-actual`);
     if (!res.ok) throw new Error("respuesta no ok");
     const data = await res.json();
     marcarConexion(true);
+    revisarVersion(data);
+    if (data.autodesconexion_min) autodesconexionMin = data.autodesconexion_min;
     aplicarDisponibilidad(data.disponibilidad === "disponible" || data.disponibilidad === "en_oferta" || data.disponibilidad === "ocupado");
     document.getElementById("nombreProveedor").textContent = data.nombre || `Proveedor #${proveedorId}`;
     renderContenido(data);
@@ -317,6 +383,23 @@ async function consultarEstadoActual() {
     marcarConexion(false);
   }
 }
+
+/* Versión nueva de la app: se recarga sola si el doctor está libre; si tiene oferta o servicio, avisa con un botón */
+function revisarVersion(data) {
+  if (!data.app_version || data.app_version === APP_VERSION) return;
+  if (!data.oferta_pendiente && !data.servicio_activo) {
+    let ya = null;
+    try { ya = sessionStorage.getItem('recargaVersion'); } catch (e) {}
+    if (ya !== data.app_version) {                // una sola recarga automática por versión (evita bucles)
+      try { sessionStorage.setItem('recargaVersion', data.app_version); } catch (e) {}
+      location.reload(); return;
+    }
+  }
+  document.getElementById('avisoVersion').style.display = 'block';
+}
+document.getElementById('btnActualizarApp').onclick = () => location.reload();
+document.getElementById('btnRecargar').onclick = () => location.reload();
+document.getElementById('txtVersion').textContent = APP_VERSION;
 
 function marcarConexion(ok) {
   document.getElementById("dotConexion").className = "dot-conexion" + (ok ? "" : " mala");
@@ -327,9 +410,15 @@ function marcarConexion(ok) {
    RENDER PRINCIPAL
    ========================================================= */
 function renderContenido(data) {
+  const firma = JSON.stringify([data.oferta_pendiente, data.servicio_activo, disponible]);
+  if (firma === ultimaFirma) return;      // nada cambió: no se redibuja (evita el parpadeo del mapa)
+  ultimaFirma = firma;
+
   const cont = document.getElementById("contenedorDinamico");
+  if (mapaEspera) { mapaEspera.remove(); mapaEspera = null; markerEspera = null; }
 
   if (data.oferta_pendiente) {
+    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
     cont.innerHTML = renderOferta(data.oferta_pendiente);
     document.getElementById("btnAceptarOferta").onclick = () => responderOferta(data.oferta_pendiente.oferta_id, true);
     document.getElementById("btnRechazarOferta").onclick = () => responderOferta(data.oferta_pendiente.oferta_id, false);
@@ -339,6 +428,8 @@ function renderContenido(data) {
   if (data.servicio_activo) {
     cont.innerHTML = renderServicioActivo(data.servicio_activo);
     inicializarMapaServicio(data.servicio_activo);
+    const btnInformar = document.getElementById("btnInformar");
+    if (btnInformar) btnInformar.onclick = () => abrirAviso(data.servicio_activo.solicitud_id);
     const btnAvanzar = document.getElementById("btnAvanzarPaso");
     if (btnAvanzar) {
       btnAvanzar.onclick = () => avanzarPaso(data.servicio_activo.solicitud_id, data.servicio_activo.estado);
@@ -347,6 +438,7 @@ function renderContenido(data) {
   }
 
   cont.innerHTML = renderVacio(disponible);
+  inicializarMapaEspera();
 }
 
 function renderVacio(estaDisponible) {
@@ -358,20 +450,55 @@ function renderVacio(estaDisponible) {
       </div>`;
   }
   return `
-    <div class="card vacio">
-      <div class="icono">📡</div>
-      <p>Esperando nuevas solicitudes cerca de ti…</p>
+    <div class="card">
+      <div id="mapaEspera"></div>
+      <div class="espera-txt">📡 Esperando nuevas solicitudes cerca de ti…</div>
     </div>`;
+}
+
+/* Mapa mientras espera: muestra su propia posición. Los mosaicos los baja el celular directo de OpenStreetMap
+   (no pasan por nuestro servidor); no se consulta ninguna API adicional. */
+let mapaEspera = null, markerEspera = null;
+
+function inicializarMapaEspera() {
+  const el = document.getElementById("mapaEspera");
+  if (!el) return;
+  const centro = ultimaPosicion ? [ultimaPosicion.lat, ultimaPosicion.lng] : [-12.0464, -77.0428];
+  mapaEspera = L.map("mapaEspera", { zoomControl: false }).setView(centro, ultimaPosicion ? 15 : 11);
+  mapaEspera.attributionControl.setPrefix(false);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" }).addTo(mapaEspera);
+  markerEspera = null;
+  pintarPosicionEspera();
+}
+
+function pintarPosicionEspera() {
+  if (!mapaEspera || !ultimaPosicion) return;
+  const pos = [ultimaPosicion.lat, ultimaPosicion.lng];
+  if (!markerEspera) {
+    markerEspera = L.marker(pos, { icon: L.divIcon({
+      className: "", iconSize: [18, 18],
+      html: '<div style="width:18px;height:18px;border-radius:50%;background:#00A9B7;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,169,183,.6);"></div>',
+    }) }).addTo(mapaEspera);
+    mapaEspera.setView(pos, 15);
+  } else {
+    markerEspera.setLatLng(pos);
+  }
 }
 
 function renderOferta(oferta) {
   const nombreServicio = oferta.tipo_servicio === "AMBULANCIA" ? "Ambulancia" : "Médico a domicilio";
-  const distanciaTexto = oferta.distancia_metros != null ? `${(oferta.distancia_metros / 1000).toFixed(1)} km de tu ubicación` : "";
+  const vieja = oferta.ubicacion_hace_min != null && oferta.ubicacion_hace_min > 5;
+  const distanciaTexto = oferta.distancia_metros != null
+    ? (vieja
+        ? `≈ ${(oferta.distancia_metros / 1000).toFixed(1)} km según tu última ubicación (hace ${oferta.ubicacion_hace_min} min). Se recalcula al abrir la app.`
+        : `${(oferta.distancia_metros / 1000).toFixed(1)} km de tu ubicación`)
+    : "";
   return `
     <div class="card oferta-card">
       <span class="badge-nueva">Nueva solicitud</span>
       <h2>${nombreServicio}</h2>
-      <div class="direccion">${oferta.direccion || "Ubicación compartida por el cliente"}</div>
+      <div class="direccion">📍 ${esc(oferta.distrito || 'Zona no especificada')}</div>
+      ${oferta.programada_para ? `<div class="direccion" style="font-weight:700;color:var(--teal-dark)">📅 Programado: ${esc(fmtProgramada(oferta.programada_para))}</div>` : ''}
       <div class="distancia">${distanciaTexto}</div>
       <div class="oferta-botones">
         <button class="btn-rechazar" id="btnRechazarOferta">Rechazar</button>
@@ -388,13 +515,26 @@ function renderServicioActivo(servicio) {
     <div class="card servicio-card">
       <div class="top-row">
         <span class="tipo-badge">${nombreServicio}</span>
-        <span class="paso-actual">${PASO_LABEL[servicio.estado] || servicio.estado}</span>
+        <span class="paso-actual">${PASO_LABEL[servicio.estado] || esc(servicio.estado)}</span>
       </div>
-      <div class="direccion-cliente">${servicio.direccion || "Dirección no especificada"}</div>
-      <div class="telefono-cliente">${servicio.cliente_nombre || "Cliente"} · ${servicio.cliente_telefono || ""}</div>
+      <div class="direccion-cliente">${esc(servicio.direccion || 'Dirección no especificada')}</div>
+      ${servicio.programada_para ? `<div class="telefono-cliente" style="font-weight:700;color:var(--teal-dark)">📅 Programado: ${esc(fmtProgramada(servicio.programada_para))}</div>` : ''}
+      <div class="telefono-cliente">${esc(servicio.distrito || '')}${servicio.referencia ? ' · Ref: ' + esc(servicio.referencia) : ''}</div>
+      <div class="telefono-cliente">${servicio.contacto_telefono
+        ? 'Contacto en el lugar: ' + esc(servicio.contacto_nombre || '') + ' · ' + esc(servicio.contacto_telefono)
+        : esc(servicio.cliente_nombre || 'Cliente') + ' · ' + esc(servicio.cliente_telefono || '')}</div>
+      ${(servicio.paciente_dni || servicio.sintomas || servicio.alergias || servicio.antecedentes || servicio.copago_monto != null) ? `
+      <div class="datos-clinicos">
+        <b>Paciente</b>${esc(servicio.cliente_nombre || '')}${servicio.paciente_edad != null ? ' · ' + esc(servicio.paciente_edad) + ' años' : ''}${servicio.paciente_dni ? ' · DNI ' + esc(servicio.paciente_dni) : ''}
+        ${servicio.sintomas ? `<b>Síntomas</b>${esc(servicio.sintomas)}` : ''}
+        ${servicio.antecedentes ? `<b>Antecedentes</b>${esc(servicio.antecedentes)}` : ''}
+        ${servicio.alergias ? `<b>Alergias a medicamentos</b><span class="alergia">${esc(servicio.alergias)}</span>` : ''}
+        ${servicio.copago_monto != null ? `<b>Copago a cobrar</b>S/ ${esc(Number(servicio.copago_monto).toFixed(2))} · ${esc(({efectivo:'Efectivo',tarjeta:'Tarjeta',yape_plin:'Yape / Plin'})[servicio.forma_pago] || '')}` : ''}
+      </div>` : ''}
+      ${['asignado','en_camino','llego'].includes(servicio.estado) ? `<button class="btn-informar" id="btnInformar">📣 Informar al cliente</button>` : ''}
       <div id="mapaServicio"></div>
       <div class="botones-accion">
-        <a class="btn-llamar" href="tel:${servicio.cliente_telefono || ''}" aria-label="Llamar al cliente">
+        <a class="btn-llamar" href="tel:+${String(servicio.contacto_telefono || servicio.cliente_telefono || '').replace(/\D/g, '')}" aria-label="Llamar al contacto">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         </a>
         ${paso ? `<button class="btn-avanzar ${esUltimoPaso ? 'finalizar' : ''}" id="btnAvanzarPaso">${paso.label}</button>` : ""}
@@ -410,10 +550,12 @@ function inicializarMapaServicio(servicio) {
   if (!el || servicio.origen_lat == null) return;
 
   if (mapaServicio) { mapaServicio.remove(); mapaServicio = null; }
+  markerCliente = null; markerProveedor = null;
 
-  mapaServicio = L.map("mapaServicio", { zoomControl: false, attributionControl: false })
+  mapaServicio = L.map("mapaServicio", { zoomControl: false, attributionControl: true })
     .setView([servicio.origen_lat, servicio.origen_lng], 14);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 }).addTo(mapaServicio);
+  mapaServicio.attributionControl.setPrefix(false);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" }).addTo(mapaServicio);
 
   const iconoCliente = L.divIcon({
     className: "", iconSize: [16, 16],
@@ -435,11 +577,11 @@ function dibujarPosicionProveedorEnMapa() {
   const pos = [ultimaPosicion.lat, ultimaPosicion.lng];
   if (!markerProveedor) {
     markerProveedor = L.marker(pos, { icon: iconoProveedor }).addTo(mapaServicio);
+    if (markerCliente) {
+      mapaServicio.fitBounds(L.latLngBounds([pos, markerCliente.getLatLng()]), { padding: [40, 40] });
+    }
   } else {
     markerProveedor.setLatLng(pos);
-  }
-  if (markerCliente) {
-    mapaServicio.fitBounds(L.latLngBounds([pos, markerCliente.getLatLng()]), { padding: [40, 40] });
   }
 }
 
@@ -448,13 +590,63 @@ function dibujarPosicionProveedorEnMapa() {
    ========================================================= */
 async function responderOferta(ofertaId, aceptar) {
   const ruta = aceptar ? "aceptar" : "rechazar";
+  const a = document.getElementById("btnAceptarOferta"), r = document.getElementById("btnRechazarOferta");
+  if (a) a.disabled = true;
+  if (r) r.disabled = true;
   try {
-    await fetch(`${API_BASE}/ofertas/${ofertaId}/${ruta}`, { method: "POST" });
+    await MadAuth.fetch(`${API_BASE}/ofertas/${ofertaId}/${ruta}`, { method: "POST" });
   } catch (e) {
     // el próximo polling corrige el estado igual
   }
+  ultimaFirma = null;
   consultarEstadoActual();
+  cargarResumenRapido();
 }
+
+/* ── Avisos del doctor al cliente y al monitor ── */
+const AVISOS = [
+  ["trafico",   "🚦 Hay tráfico en la ruta"],
+  ["problema",  "⚠️ Tengo problemas para llegar al punto"],
+  ["cerca",     "📍 Estoy cerca de tu ubicación"],
+  ["direccion", "🏠 No encuentro la dirección"],
+  ["otro",      "💬 Otro mensaje…"],
+];
+let avisoSolicitudId = null, avisoTipo = null;
+function abrirAviso(solicitudId) {
+  avisoSolicitudId = solicitudId; avisoTipo = null;
+  document.getElementById("avisoTexto").value = "";
+  document.getElementById("avisoError").textContent = "";
+  const cont = document.getElementById("opcionesAviso");
+  cont.textContent = "";
+  AVISOS.forEach(([tipo, label]) => {
+    const b = document.createElement("button");
+    b.className = "opc-aviso"; b.textContent = label;
+    b.onclick = () => {
+      avisoTipo = tipo;
+      cont.querySelectorAll(".opc-aviso").forEach(x => x.classList.toggle("sel", x === b));
+      if (tipo === "otro") document.getElementById("avisoTexto").focus();
+    };
+    cont.appendChild(b);
+  });
+  document.getElementById("modalAviso").style.display = "flex";
+}
+document.getElementById("btnCerrarAviso").onclick = () => { document.getElementById("modalAviso").style.display = "none"; };
+document.getElementById("btnEnviarAviso").onclick = async () => {
+  const err = document.getElementById("avisoError"), btn = document.getElementById("btnEnviarAviso");
+  if (!avisoTipo) { err.textContent = "Elige un aviso"; return; }
+  btn.disabled = true; err.textContent = "";
+  try {
+    const r = await MadAuth.fetch(`${API_BASE}/solicitudes/${avisoSolicitudId}/novedad`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tipo: avisoTipo, texto: document.getElementById("avisoTexto").value }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { err.textContent = j.error || "No se pudo enviar el aviso"; return; }
+    document.getElementById("modalAviso").style.display = "none";
+  } catch (e) {
+    err.textContent = "Sin conexión. Intenta de nuevo.";
+  } finally { btn.disabled = false; }
+};
 
 async function avanzarPaso(solicitudId, estadoActual) {
   const paso = PASO_SIGUIENTE[estadoActual];
@@ -463,55 +655,277 @@ async function avanzarPaso(solicitudId, estadoActual) {
   if (boton) { boton.disabled = true; boton.textContent = "Actualizando…"; }
 
   try {
-    await fetch(`${API_BASE}/solicitudes/${solicitudId}/estado`, {
+    // El doctor lo identifica el servidor por su sesión, no por el cuerpo de la petición
+    await MadAuth.fetch(`${API_BASE}/solicitudes/${solicitudId}/estado`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ estado: paso.estado, proveedor_id: proveedorId }),
+      body: JSON.stringify({ estado: paso.estado }),
     });
   } catch (e) {
     // el próximo polling corrige el estado
   }
+  ultimaFirma = null;
   consultarEstadoActual();
+  cargarResumenRapido();
 }
 
 /* =========================================================
    GEOLOCALIZACIÓN
    ========================================================= */
-function iniciarGeolocalizacion() {
-  if (!navigator.geolocation) return;
+const POS_MAX_EDAD_MS = 60000;   // no se envía una posición más vieja que esto
+let ultimoEnvioOk = 0;
+let permisoDenegado = false;
+let wakeLock = null;
 
+function iniciarGeolocalizacion() {
+  if (!navigator.geolocation) { permisoDenegado = true; actualizarAvisos(); return; }
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
-      ultimaPosicion = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      permisoDenegado = false;
+      ultimaPosicion = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: Date.now() };
       dibujarPosicionProveedorEnMapa();
+      pintarPosicionEspera();
+      actualizarAvisos();
     },
-    (err) => console.warn("Geolocalización:", err.message),
-    { enableHighAccuracy: true, maximumAge: 5000 }
+    (err) => { if (err.code === 1) permisoDenegado = true; actualizarAvisos(); },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
   );
-
   gestionarEnvioUbicacion();
 }
 
 function gestionarEnvioUbicacion() {
   if (intervaloUbicacion) clearInterval(intervaloUbicacion);
+  intervaloUbicacion = null;
   if (!disponible) return;
-
-  const frecuencia = UBICACION_INTERVAL_ACTIVO_MS; // simplificado: misma frecuencia con o sin servicio activo mientras está disponible
-  intervaloUbicacion = setInterval(enviarUbicacionActual, frecuencia);
+  intervaloUbicacion = setInterval(enviarUbicacionActual, UBICACION_INTERVAL_ACTIVO_MS);
 }
 
 async function enviarUbicacionActual() {
-  if (!ultimaPosicion || !proveedorId) return;
+  if (!ultimaPosicion || !proveedorId || !disponible) return;
+  if (Date.now() - ultimaPosicion.t > POS_MAX_EDAD_MS) { actualizarAvisos(); return; }  // nunca enviar posiciones viejas
   try {
-    await fetch(`${API_BASE}/proveedores/${proveedorId}/ubicacion`, {
+    const r = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/ubicacion`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lat: ultimaPosicion.lat, lng: ultimaPosicion.lng }),
     });
+    if (r.ok) ultimoEnvioOk = Date.now();
+  } catch (e) {}
+  actualizarAvisos();
+}
+
+function actualizarAvisos() {
+  const el = document.getElementById('avisoUbic');
+  let msg = '';
+  if (disponible) {
+    if (permisoDenegado) msg = '📍 La ubicación está bloqueada. Actívala en los ajustes del navegador o dejarás de recibir solicitudes.';
+    else if (!ultimaPosicion || Date.now() - ultimaPosicion.t > 120000) msg = '📍 No estamos recibiendo tu ubicación. Abre esta pantalla para actualizarla. Mientras tanto recibirás solicitudes según tu última posición, pero te desconectaremos si pasan ' + autodesconexionMin + ' min sin señal.';
+    else if (ultimoEnvioOk && Date.now() - ultimoEnvioOk > 120000) msg = '⚠️ No se pudo enviar tu ubicación. Revisa tu conexión.';
+  }
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+setInterval(actualizarAvisos, 5000);
+
+/* Pantalla encendida mientras está conectado */
+async function pedirWakeLock() {
+  try {
+    if (!('wakeLock' in navigator) || !disponible || document.hidden) return;
+    if (wakeLock && !wakeLock.released) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) {}
+}
+function soltarWakeLock() {
+  try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  wakeLock = null;
+}
+
+/* Al volver a la app: se reinicia el GPS (se pausa en segundo plano) y se envía la posición ya */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !proveedorId) return;
+  pedirWakeLock();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+  iniciarGeolocalizacion();
+  setTimeout(enviarUbicacionActual, 1500);
+  consultarEstadoActual();
+});
+
+/* =========================================================
+   MIS SERVICIOS (hoy, mes y rango de fechas)
+   ========================================================= */
+const p2 = n => String(n).padStart(2, '0');
+const fechaISO = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+const fechaCorta = iso => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+
+async function cargarResumenRapido() {
+  try {
+    const r = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/estadisticas`);
+    const d = await r.json();
+    document.getElementById('rHoy').textContent = d.hoy;
+    document.getElementById('rMes').textContent = d.mes;
+  } catch (e) {}
+}
+
+function fijarRango(tipo) {
+  const h = new Date();
+  let desde = h, hasta = h;
+  if (tipo === 'mes') desde = new Date(h.getFullYear(), h.getMonth(), 1);
+  if (tipo === 'mesant') { desde = new Date(h.getFullYear(), h.getMonth() - 1, 1); hasta = new Date(h.getFullYear(), h.getMonth(), 0); }
+  document.getElementById('hDesde').value = fechaISO(desde);
+  document.getElementById('hHasta').value = fechaISO(hasta);
+  consultarHistorial();
+}
+
+async function consultarHistorial() {
+  const desde = document.getElementById('hDesde').value, hasta = document.getElementById('hHasta').value;
+  const r = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/estadisticas?desde=${desde}&hasta=${hasta}`);
+  const d = await r.json();
+  document.getElementById('hTotal').textContent = d.rango;
+  document.getElementById('hMad').textContent = d.rango_mad;
+  document.getElementById('hAmb').textContent = d.rango_ambulancia;
+  document.getElementById('hDias').innerHTML = d.por_dia.length
+    ? d.por_dia.map(x => `<tr><td>${fechaCorta(x.fecha)}</td><td><b>${x.total}</b></td><td style="color:var(--texto-mute)">${x.mad} méd. · ${x.ambulancia} amb.</td></tr>`).join('')
+    : '<tr><td style="color:var(--texto-mute)">Sin servicios en este rango</td></tr>';
+  document.getElementById('hDetalle').innerHTML = d.servicios.map(s =>
+    `<tr><td>${new Date(s.finalizado_en).toLocaleString('es-PE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</td>
+     <td>${s.tipo === 'AMBULANCIA' ? 'Ambulancia' : 'Médico'}</td><td>${esc(s.distrito || '')}</td></tr>`).join('');
+}
+
+document.getElementById('btnHistorial').onclick = () => {
+  document.getElementById('modalHist').style.display = 'flex';
+  fijarRango('mes');
+};
+document.getElementById('btnCerrarHist').onclick = () => { document.getElementById('modalHist').style.display = 'none'; };
+document.getElementById('btnConsultarHist').onclick = consultarHistorial;
+document.querySelectorAll('.chips button').forEach(b => b.onclick = () => fijarRango(b.dataset.r));
+
+/* =========================================================
+   AVISOS PUSH (notificación en el celular aunque la app esté minimizada)
+   ========================================================= */
+let pushEndpoint = null;
+let estadoAvisos = 'oculto';
+
+function b64aU8(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+const pushSoportado = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const estaInstalada = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+function pintarAvisos(estado, extra) {
+  estadoAvisos = estado;
+  const card = document.getElementById('cardAvisos'), txt = document.getElementById('txtAvisos'), btn = document.getElementById('btnAvisos');
+  const t = {
+    oculto:    [null, null],
+    ios:       ['En iPhone los avisos solo funcionan con la app instalada en la pantalla de inicio (iOS 16.4 o superior). Instálala y ábrela desde ese ícono.', null],
+    inactivo:  ['Recibe un aviso en tu celular cuando llegue una solicitud, aunque tengas otra app abierta o la pantalla bloqueada.', 'Activar avisos'],
+    bloqueado: ['Los avisos están bloqueados. Actívalos en los ajustes del navegador o de la app para este sitio y vuelve a abrir esta pantalla.', null],
+    activo:    ['✅ Avisos activados en este dispositivo.', 'Enviar aviso de prueba'],
+    error:     ['No se pudieron activar los avisos en este dispositivo.', 'Reintentar'],
+  }[estado] || [null, null];
+  if (!t[0]) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  txt.textContent = extra || t[0];
+  btn.style.display = t[1] ? 'inline-block' : 'none';
+  btn.textContent = t[1] || '';
+  btn.disabled = false;
+}
+
+async function sincronizarPush(pedirPermiso) {
+  if (!pushSoportado()) { pintarAvisos(esIOS && !estaInstalada() ? 'ios' : 'oculto'); return; }
+  if (esIOS && !estaInstalada()) { pintarAvisos('ios'); return; }
+  if (Notification.permission === 'denied') { pintarAvisos('bloqueado'); return; }
+  if (Notification.permission === 'default') {
+    if (!pedirPermiso) { pintarAvisos('inactivo'); return; }
+    const r = await Notification.requestPermission();           // debe venir de un toque del doctor
+    if (r !== 'granted') { pintarAvisos(r === 'denied' ? 'bloqueado' : 'inactivo'); return; }
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const rc = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/push/clave`);
+    const clave = (await rc.json()).public_key;
+    if (!clave) { pintarAvisos('oculto'); return; }              // el servidor aún no tiene avisos configurados
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aU8(clave) });
+    pushEndpoint = sub.endpoint;
+    const rs = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/push/suscribir`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub.toJSON()),
+    });
+    if (!rs.ok) throw new Error('no se pudo registrar');
+    pintarAvisos('activo');
   } catch (e) {
-    // se reintenta en el próximo ciclo
+    pintarAvisos('error');
   }
 }
+
+async function probarAviso() {
+  const btn = document.getElementById('btnAvisos');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const r = await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/push/probar`, { method: 'POST' });
+    const d = await r.json();
+    pintarAvisos('activo', r.ok ? '✅ Aviso enviado. Minimiza la app y debería llegarte en unos segundos.'
+                               : (d.error || 'No se pudo enviar el aviso de prueba.'));
+  } catch (e) { pintarAvisos('activo'); }
+}
+
+document.getElementById('btnAvisos').onclick = () => {
+  if (estadoAvisos === 'activo') probarAviso(); else sincronizarPush(true);
+};
+
+async function darDeBajaPush() {
+  try {
+    if (pushEndpoint) {
+      await MadAuth.fetch(`${API_BASE}/proveedores/${proveedorId}/push/baja`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: pushEndpoint }),
+      });
+    }
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+  } catch (e) {}
+}
+
+/* =========================================================
+   PWA: registro e instalación
+   ========================================================= */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/proveedor-sw.js').catch(() => {});
+
+(function () {
+  const esStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (esStandalone) return;                                   // ya está instalada
+  const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const card = document.getElementById('cardInstalar'), txt = document.getElementById('txtInstalar'), btn = document.getElementById('btnInstalar');
+  let evento = null;
+
+  if (esIOS) {
+    txt.textContent = 'En Safari toca el botón Compartir y elige «Añadir a pantalla de inicio». Abre siempre la app desde ese ícono.';
+    card.style.display = 'block';
+  } else {
+    txt.textContent = 'Instálala para abrirla en pantalla completa y mantenerla siempre a la mano. También puedes usar el menú del navegador (⋮) → «Instalar aplicación».';
+    card.style.display = 'block';
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); evento = e; btn.style.display = 'inline-block'; });
+    btn.onclick = async () => { if (!evento) return; evento.prompt(); await evento.userChoice; evento = null; card.style.display = 'none'; };
+  }
+  window.addEventListener('appinstalled', () => { card.style.display = 'none'; });
+})();
+
+/* =========================================================
+   LOGIN (clave + Google Authenticator)
+   ========================================================= */
+(async () => {
+  const sesion = await MadAuth.iniciar({ rol: 'proveedor', titulo: 'Panel de Proveedor' });
+  const volver = new URLSearchParams(location.search).get('volver');
+  if (volver && volver.startsWith('/oferta/')) { location.href = volver; return; }
+  proveedorId = sesion.proveedor_id;
+  document.getElementById('nombreProveedor').textContent = sesion.nombre;
+  document.getElementById('appPrincipal').style.display = 'flex';
+  document.getElementById('btnSalir').onclick = async () => { await darDeBajaPush(); MadAuth.cerrarSesion(); };
+  iniciarApp();
+})();
 </script>
 
 </body>

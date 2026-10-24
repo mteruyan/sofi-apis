@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Mis doctores — Sanitas MAD</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/static/mad_auth.js"></script>
+<style>
+  :root{ --navy:#003654; --teal:#00A9B7; --teal-dark:#007A87; --bg:#F4F7F9; --border:#DCE4E8; --gray:#6B7A82; --danger:#D64545; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--navy)}
+  header{background:linear-gradient(135deg,var(--navy),var(--teal-dark));color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{margin:0;font-size:17px}
+  header small{opacity:.8;display:block;font-size:12px}
+  .btn{background:#fff;color:var(--navy);border:none;border-radius:6px;padding:7px 11px;font-weight:600;cursor:pointer;font-size:12.5px}
+  .btn.sec{background:none;color:#fff;border:1px solid rgba(255,255,255,.5)}
+  .btn:disabled{opacity:.6}
+  main{max-width:1000px;margin:0 auto;padding:14px}
+  .card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px}
+  .filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .filtros label{font-size:11px;color:var(--gray);display:block;margin-bottom:3px;text-transform:uppercase}
+  .filtros input{padding:8px;border:1px solid var(--border);border-radius:6px;font-size:14px}
+  .filtros button{padding:9px 12px;border:1px solid var(--border);background:#fff;border-radius:6px;cursor:pointer;font-size:13px}
+  .filtros button.main{background:var(--teal);color:#fff;border-color:var(--teal);font-weight:700}
+  .filtros button.excel{background:#1D6F42;color:#fff;border-color:#1D6F42;font-weight:700;margin-left:auto}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+  .kpi{background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center}
+  .kpi b{display:block;font-size:26px}
+  .kpi span{font-size:11.5px;color:var(--gray);text-transform:uppercase}
+  .tabla{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{background:var(--navy);color:#fff;text-align:left;padding:9px 10px;font-size:12px}
+  td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;color:#fff;white-space:nowrap}
+  .muted{color:var(--gray);font-size:12px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin:0}
+  .fila-titulo{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap}
+  .mini{border:1px solid var(--border);background:#fff;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;margin:2px 2px 2px 0}
+  .mini.rojo{color:var(--danger);border-color:#f0c2bb}
+  .msg{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
+  #map{height:340px;border-radius:8px}
+  .pin-prov{width:32px;height:32px;border-radius:50%;border:3px solid var(--c);background:#fff;color:var(--c);
+    font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+  .form-doc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .form-doc input,.form-doc select{padding:9px;border:1px solid var(--border);border-radius:6px;font-size:14px;min-width:0}
+  .form-doc button{grid-column:1/-1;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer}
+  #credencial{display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:10px 12px;font-size:13px;margin:10px 0}
+  @media(max-width:600px){ .form-doc{grid-template-columns:1fr} }
+  #credencialUsr{display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:10px 12px;font-size:13px;margin:10px 0}
+  #modalDoc{display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2000;align-items:center;justify-content:center;padding:16px}
+  #modalDoc .caja{background:#fff;border-radius:12px;width:100%;max-width:420px;padding:18px}
+  #modalDoc input,#modalDoc select{width:100%;padding:9px;border:1px solid var(--border);border-radius:6px;font-size:14px;margin-top:8px}
+  #modalDoc .botones{display:flex;gap:8px;margin-top:14px}
+  #modalDoc .botones button{flex:1;padding:10px;border:none;border-radius:8px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 id="titulo">Mis doctores</h1><small id="quien"></small></div>
+  <div style="display:flex;gap:8px">
+    <button class="btn" id="btnRefrescar">🔄 Actualizar</button>
+    <button class="btn sec" id="btnSalir">Salir</button>
+  </div>
+</header>
+<main>
+  <div class="card filtros">
+    <div><label>Desde</label><input type="date" id="fDesde"></div>
+    <div><label>Hasta</label><input type="date" id="fHasta"></div>
+    <button class="main" id="btnVer">Ver</button>
+    <button data-r="hoy">Hoy</button><button data-r="mes">Este mes</button><button data-r="mesant">Mes anterior</button>
+    <button class="excel" id="btnExcel">📥 Descargar Excel</button>
+  </div>
+  <div class="msg" id="msg"></div>
+
+  <div class="kpis">
+    <div class="kpi"><b id="kHoy">0</b><span>Hoy</span></div>
+    <div class="kpi"><b id="kMes">0</b><span>Este mes</span></div>
+    <div class="kpi"><b id="kRango">0</b><span>En el rango</span></div>
+    <div class="kpi"><b id="kMad">0</b><span>Médico</span></div>
+    <div class="kpi"><b id="kAmb">0</b><span>Ambulancia</span></div>
+  </div>
+
+  <div class="card">
+    <div class="fila-titulo">
+      <h2>Ubicación de mis doctores</h2>
+      <button class="mini" id="btnVerTodos">🎯 Ver todos</button>
+    </div>
+    <div id="map"></div>
+    <div class="muted" id="notaMapa" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card tabla">
+    <div class="fila-titulo">
+      <h2>Doctores</h2>
+      <button class="mini" id="btnNuevoDoc">➕ Nuevo doctor</button>
+    </div>
+    <div id="panelNuevo" style="display:none">
+      <form class="form-doc" id="formDoctor">
+        <input id="dNombre" placeholder="Nombre (ej. Dr. Juan Pérez)" required>
+        <input id="dUsuario" placeholder="Usuario (ej. jperez)" required autocapitalize="none">
+        <input id="dTelefono" placeholder="Celular (9 dígitos)" required inputmode="numeric">
+        <input id="dCmp" placeholder="CMP (4 a 6 dígitos)" inputmode="numeric" maxlength="6">
+        <select id="dTipo">
+          <option value="MAD">Médico a domicilio</option>
+          <option value="AMBULANCIA">Ambulancia</option>
+          <option value="AMBOS">Ambos</option>
+        </select>
+        <button type="submit">Crear doctor</button>
+      </form>
+    </div>
+    <div id="credencial"></div>
+    <table>
+      <thead><tr><th>Doctor</th><th>Estado ahora</th><th>Hoy</th><th>Este mes</th><th>En el rango</th><th>Detalle</th><th>Acceso</th></tr></thead>
+      <tbody id="tDoctores"></tbody>
+    </table>
+  </div>
+
+  <div class="card tabla">
+    <div class="fila-titulo">
+      <h2>Usuarios con acceso a este portal</h2>
+      <button class="mini" id="btnNuevoUsr">➕ Nuevo usuario</button>
+    </div>
+    <div id="panelNuevoUsr" style="display:none">
+      <form class="form-doc" id="formUsuario">
+        <input id="uNombre" placeholder="Nombre de la persona" required>
+        <input id="uUsuario" placeholder="Usuario (ej. mrojas)" required autocapitalize="none">
+        <button type="submit">Crear usuario</button>
+      </form>
+    </div>
+    <div id="credencialUsr"></div>
+    <table>
+      <thead><tr><th>Usuario</th><th>Estado</th><th>Último ingreso</th><th>Acceso</th></tr></thead>
+      <tbody id="tUsuarios"></tbody>
+    </table>
+  </div>
+
+  <div class="card tabla">
+    <div class="fila-titulo"><h2>Servicios por día (todos mis doctores)</h2></div>
+    <table>
+      <thead><tr><th>Día</th><th>Total</th><th>Médico</th><th>Ambulancia</th></tr></thead>
+      <tbody id="tDias"></tbody>
+    </table>
+  </div>
+  <div class="muted" id="act"></div>
+</main>
+
+<div id="modalDoc">
+  <div class="caja">
+    <b style="font-size:16px">Editar doctor</b>
+    <div class="muted" id="eUsuarioInfo" style="margin-top:4px"></div>
+    <form id="formEditar">
+      <input id="eNombre" placeholder="Nombre" required maxlength="120">
+      <input id="eTelefono" placeholder="Celular (9 dígitos)" required inputmode="numeric">
+      <input id="eCmp" placeholder="CMP (4 a 6 dígitos)" inputmode="numeric" maxlength="6">
+      <select id="eTipo">
+        <option value="MAD">Médico a domicilio</option>
+        <option value="AMBULANCIA">Ambulancia</option>
+        <option value="AMBOS">Ambos</option>
+      </select>
+      <div class="muted" style="margin-top:8px">Si cambias el celular, se enviará un aviso al número nuevo y al anterior. Las solicitudes por SMS llegarán al nuevo.</div>
+      <div class="msg" id="eError" style="margin:8px 0 0"></div>
+      <div class="botones">
+        <button type="button" id="eCancelar" style="background:#eef1f5;color:var(--navy)">Volver</button>
+        <button type="submit" id="eGuardar" style="background:var(--teal);color:#fff">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const p2 = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
+const corta = f => { const [y, m, d] = f.split('-'); return `${d}/${m}/${y}`; };
+const setMsg = t => { $('msg').textContent = t || ''; };
+const ESTADO = { disponible:['Disponible','#2E9E5B'], en_oferta:['Recibiendo oferta','#E8A33D'],
+                 ocupado:['En servicio','#2d6cdf'], desconectado:['Desconectado','#9aa5ab'] };
+let doctoresMap = {};
+const OCULTO = { desconectado:'desconectados', en_atencion:'atendiendo en un domicilio', sin_senal:'sin señal reciente' };
+
+async function post(url, body){
+  const r = await MadAuth.fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body || {}) });
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  return { ok: r.ok, d };
+}
+
+/* ───────── Rango de fechas ───────── */
+function fijarRango(t){
+  const h = new Date(); let d = h, a = h;
+  if (t === 'mes') d = new Date(h.getFullYear(), h.getMonth(), 1);
+  if (t === 'mesant'){ d = new Date(h.getFullYear(), h.getMonth()-1, 1); a = new Date(h.getFullYear(), h.getMonth(), 0); }
+  $('fDesde').value = iso(d); $('fHasta').value = iso(a);
+  cargar();
+}
+
+/* ───────── Resumen y tabla de doctores ───────── */
+async function cargar(){
+  const desde = $('fDesde').value, hasta = $('fHasta').value;
+  try{
+    const r = await MadAuth.fetch(`/mad/empresa/resumen?desde=${desde}&hasta=${hasta}`, { cache:'no-store' });
+    const d = await r.json();
+    if (!r.ok){ $('act').textContent = d.error || 'Error'; return; }
+
+    $('titulo').textContent = d.empresa;
+    doctoresMap = {}; d.doctores.forEach(x => { doctoresMap[x.id] = x; });
+    const t = d.totales;
+    $('kHoy').textContent = t.hoy; $('kMes').textContent = t.mes; $('kRango').textContent = t.rango;
+    $('kMad').textContent = t.rango_mad; $('kAmb').textContent = t.rango_ambulancia;
+
+    $('tDoctores').innerHTML = d.doctores.length ? d.doctores.map(x => {
+      if (x.vigente === false) {
+        return `<tr style="background:#fafafa">
+          <td><b>${esc(x.nombre)}</b><br><span class="muted">${esc(x.tipo_servicio)}${x.cmp ? ' · CMP ' + esc(x.cmp) : ''}</span></td>
+          <td><span class="badge" style="background:#9aa5ab">Ya no pertenece a tu empresa</span></td>
+          <td><b>${x.hoy}</b></td><td><b>${x.mes}</b></td><td><b>${x.rango}</b></td>
+          <td class="muted">${x.rango_mad} méd. · ${x.rango_ambulancia} amb.</td>
+          <td class="muted">—</td></tr>`;
+      }
+      let [txt, col] = ESTADO[x.estado] || ESTADO.desconectado;
+      if (!x.usuario_activo){ txt = 'Cuenta inactiva'; col = '#9aa5ab'; }
+      else if (['disponible','en_oferta','ocupado'].includes(x.estado) && (x.minutos_senal == null || x.minutos_senal > 5)){ txt = 'Señal antigua'; col = '#9aa5ab'; }
+      const pendiente = x.usuario_activo && !x.totp_activo ? '<br><span class="muted">⏳ Pendiente de primer ingreso</span>' : '';
+      return `<tr>
+        <td><b>${esc(x.nombre)}</b><br><span class="muted">@${esc(x.usuario || '')} · ${esc(x.tipo_servicio)}${x.cmp ? ' · CMP ' + esc(x.cmp) : (x.tipo_servicio !== 'AMBULANCIA' ? ' · <b style="color:#b8433a">Sin CMP</b>' : '')}</span></td>
+        <td><span class="badge" style="background:${col}">${txt}</span>${pendiente}</td>
+        <td><b>${x.hoy}</b></td><td><b>${x.mes}</b></td><td><b>${x.rango}</b></td>
+        <td class="muted">${x.rango_mad} méd. · ${x.rango_ambulancia} amb.</td>
+        <td>
+          <button class="mini" data-editar="${x.id}">Editar</button>
+          <button class="mini" data-reset="${x.id}">Resetear acceso</button>
+          <button class="mini ${x.usuario_activo ? 'rojo' : ''}" data-estado="${x.id}" data-activo="${x.usuario_activo ? 0 : 1}">${x.usuario_activo ? 'Desactivar' : 'Activar'}</button>
+        </td></tr>`;
+    }).join('') : '<tr><td colspan="7" class="muted" style="text-align:center;padding:16px">Aún no tienes doctores. Crea el primero con "➕ Nuevo doctor".</td></tr>';
+
+    $('tDoctores').querySelectorAll('[data-editar]').forEach(b => b.onclick = () => abrirEditar(Number(b.dataset.editar)));
+    $('tDoctores').querySelectorAll('[data-reset]').forEach(b => b.onclick = async () => {
+      if (!confirm('¿Resetear la clave y Google Authenticator de este doctor? Deberá configurarlo de nuevo.')) return;
+      setMsg('');
+      const { ok, d } = await post(`/mad/empresa/doctores/${b.dataset.reset}/reset`);
+      if (ok) mostrarCredencial(d.usuario, d.password_temporal); else setMsg(d.error || 'No se pudo resetear');
+      cargar();
+    });
+    $('tDoctores').querySelectorAll('[data-estado]').forEach(b => b.onclick = async () => {
+      const activo = b.dataset.activo === '1';
+      if (!activo && !confirm('¿Desactivar a este doctor? Se cerrarán sus sesiones y dejará de recibir solicitudes.')) return;
+      setMsg('');
+      const { ok, d } = await post(`/mad/empresa/doctores/${b.dataset.estado}/estado`, { activo });
+      if (!ok) setMsg(d.error || 'No se pudo actualizar');
+      cargar(); cargarMapa();
+    });
+
+    $('tDias').innerHTML = d.por_dia.length
+      ? d.por_dia.map(x => `<tr><td>${corta(x.fecha)}</td><td><b>${x.total}</b></td><td>${x.mad}</td><td>${x.ambulancia}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="muted" style="text-align:center;padding:16px">Sin servicios en este rango</td></tr>';
+
+    $('act').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-PE');
+  }catch(e){
+    $('act').textContent = 'Sin conexión, reintentando…';
+  }
+}
+
+/* ───────── Nuevo doctor ───────── */
+function mostrarCredencial(usuario, clave){
+  const box = $('credencial');
+  box.innerHTML = '<b>Credenciales temporales</b> (se muestran una sola vez):<br>Usuario: <code id="cU"></code><br>Clave: <code id="cC"></code><br>' +
+    `<span class="muted">El doctor ingresa en ${esc(location.origin)}/proveedor. Al entrar deberá cambiar la clave y configurar Google Authenticator.</span>`;
+  box.querySelector('#cU').textContent = usuario;
+  box.querySelector('#cC').textContent = clave;
+  box.style.display = 'block';
+}
+
+$('btnNuevoDoc').onclick = () => {
+  const p = $('panelNuevo'); p.style.display = p.style.display === 'none' ? 'block' : 'none';
+};
+$('formDoctor').onsubmit = async (e) => {
+  e.preventDefault(); setMsg('');
+  const { ok, d } = await post('/mad/empresa/doctores', {
+    nombre: $('dNombre').value, usuario: $('dUsuario').value,
+    telefono: $('dTelefono').value, cmp: $('dCmp').value, tipo_servicio: $('dTipo').value,
+  });
+  if (!ok){ setMsg(d.error || 'No se pudo crear el doctor'); return; }
+  mostrarCredencial(d.usuario, d.password_temporal);
+  e.target.reset();
+  cargar(); cargarMapa();
+};
+
+/* ───────── Mapa ───────── */
+const map = L.map('map').setView([-12.0464, -77.0428], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(map);
+const capa = L.layerGroup().addTo(map);
+let ptsMapa = [], primerAjuste = false;
+
+const iniciales = n => String(n || '?').replace(/^(Dr\.?|Dra\.?)\s+/i, '').split(' ').filter(Boolean)
+  .slice(0, 2).map(p => p[0].toUpperCase()).join('');
+
+function pin(d){
+  const sin = d.minutos_senal == null || d.minutos_senal > 5;
+  const c = sin ? '#9aa5ab' : (ESTADO[d.estado] || ESTADO.desconectado)[1];
+  return L.divIcon({ className:'', iconSize:[32, 32], iconAnchor:[16, 16],
+    html:`<div class="pin-prov" style="--c:${c};${sin ? 'border-style:dashed' : ''}">${esc(iniciales(d.nombre))}</div>` });
+}
+
+async function cargarMapa(){
+  try{
+    const r = await MadAuth.fetch('/mad/empresa/ubicaciones', { cache:'no-store' });
+    const d = await r.json();
+    if (!r.ok) return;
+    capa.clearLayers(); ptsMapa = [];
+    const ocultos = {};
+    d.doctores.forEach(x => {
+      if (x.oculto){ ocultos[x.oculto] = (ocultos[x.oculto] || 0) + 1; return; }
+      L.marker([x.lat, x.lng], { icon: pin(x) })
+        .bindTooltip(`${esc(x.nombre)} · ${(ESTADO[x.estado] || ESTADO.desconectado)[0]} · señal hace ${x.minutos_senal} min`)
+        .addTo(capa);
+      ptsMapa.push([x.lat, x.lng]);
+    });
+    const partes = Object.entries(ocultos).map(([k, n]) => `${n} ${OCULTO[k]}`);
+    $('notaMapa').textContent = (ptsMapa.length ? `${ptsMapa.length} en el mapa` : 'Ningún doctor con ubicación visible')
+      + (partes.length ? ` · No se muestran: ${partes.join(', ')}` : '')
+      + ' · Se muestran solo doctores conectados; durante la atención en un domicilio la ubicación se oculta.';
+    if (!primerAjuste && ptsMapa.length){ map.fitBounds(L.latLngBounds(ptsMapa), { padding:[40, 40], maxZoom:15 }); primerAjuste = true; }
+  }catch(e){}
+}
+$('btnVerTodos').onclick = () => { if (ptsMapa.length) map.fitBounds(L.latLngBounds(ptsMapa), { padding:[40, 40], maxZoom:15 }); };
+
+/* ───────── Excel ───────── */
+$('btnExcel').onclick = async () => {
+  const b = $('btnExcel'); b.disabled = true; b.textContent = '⏳ Generando…'; setMsg('');
+  try{
+    const desde = $('fDesde').value, hasta = $('fHasta').value;
+    const r = await MadAuth.fetch(`/mad/empresa/exportar?desde=${desde}&hasta=${hasta}`);
+    if (!r.ok){ let d = {}; try { d = await r.json(); } catch (e) {} setMsg(d.error || 'No se pudo exportar'); return; }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = `servicios_${desde}_${hasta}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }catch(e){ setMsg('Error de conexión al exportar'); }
+  finally{ b.disabled = false; b.textContent = '📥 Descargar Excel'; }
+};
+
+/* ───────── Editar doctor ───────── */
+let editandoId = null;
+
+function abrirEditar(id){
+  const x = doctoresMap[id]; if (!x) return;
+  editandoId = id;
+  $('eNombre').value = x.nombre;
+  $('eTelefono').value = String(x.telefono || '').replace(/^51/, '');
+  $('eTipo').value = x.tipo_servicio;
+  $('eCmp').value = x.cmp || '';
+  $('eUsuarioInfo').textContent = x.usuario ? `Usuario de acceso: @${x.usuario} (no se puede cambiar)` : '';
+  $('eError').textContent = '';
+  $('modalDoc').style.display = 'flex';
+}
+$('eCancelar').onclick = () => { $('modalDoc').style.display = 'none'; };
+$('formEditar').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = $('eGuardar'); btn.disabled = true; btn.textContent = 'Guardando…'; $('eError').textContent = '';
+  try{
+    const { ok, d } = await post(`/mad/empresa/doctores/${editandoId}/editar`, {
+      nombre: $('eNombre').value, telefono: $('eTelefono').value, cmp: $('eCmp').value, tipo_servicio: $('eTipo').value,
+    });
+    if (!ok){ $('eError').textContent = d.error || 'No se pudo guardar'; return; }
+    $('modalDoc').style.display = 'none';
+    cargar(); cargarMapa();
+  }catch(err){ $('eError').textContent = 'Error de conexión, intenta nuevamente'; }
+  finally{ btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+};
+
+/* ───────── Usuarios de la empresa ───────── */
+function mostrarCredencialUsr(usuario, clave){
+  const box = $('credencialUsr');
+  box.innerHTML = '<b>Credenciales temporales</b> (se muestran una sola vez):<br>Usuario: <code id="uCU"></code><br>Clave: <code id="uCC"></code><br>' +
+    `<span class="muted">Ingresa en ${esc(location.origin)}/mad/empresa. Al entrar deberá cambiar la clave y configurar Google Authenticator.</span>`;
+  box.querySelector('#uCU').textContent = usuario;
+  box.querySelector('#uCC').textContent = clave;
+  box.style.display = 'block';
+}
+
+async function cargarUsuarios(){
+  try{
+    const r = await MadAuth.fetch('/mad/empresa/usuarios', { cache:'no-store' });
+    const d = await r.json();
+    if (!r.ok) return;
+    $('tUsuarios').innerHTML = d.usuarios.map(u => {
+      const estado = !u.activo ? '⛔ Inactivo' : u.bloqueado ? '🔒 Bloqueado'
+                   : u.totp_activo ? '🔐 2FA activo' : '⏳ Pendiente de primer ingreso';
+      const acciones = u.yo ? '<span class="muted">Eres tú</span>'
+        : `<button class="mini" data-ureset="${u.id}">Resetear acceso</button>
+           <button class="mini ${u.activo ? 'rojo' : ''}" data-uestado="${u.id}" data-activo="${u.activo ? 0 : 1}">${u.activo ? 'Desactivar' : 'Activar'}</button>`;
+      return `<tr><td><b>${esc(u.nombre)}${u.yo ? ' (tú)' : ''}</b><br><span class="muted">@${esc(u.usuario)}</span></td>
+        <td>${estado}</td>
+        <td class="muted">${u.ultimo_login ? new Date(u.ultimo_login).toLocaleString('es-PE') : '—'}</td>
+        <td>${acciones}</td></tr>`;
+    }).join('');
+
+    $('tUsuarios').querySelectorAll('[data-ureset]').forEach(b => b.onclick = async () => {
+      if (!confirm('¿Resetear la clave y Google Authenticator de este usuario? Deberá configurarlo de nuevo.')) return;
+      setMsg('');
+      const { ok, d } = await post(`/mad/empresa/usuarios/${b.dataset.ureset}/reset`);
+      if (ok) mostrarCredencialUsr(d.usuario, d.password_temporal); else setMsg(d.error || 'No se pudo resetear');
+      cargarUsuarios();
+    });
+    $('tUsuarios').querySelectorAll('[data-uestado]').forEach(b => b.onclick = async () => {
+      const activo = b.dataset.activo === '1';
+      if (!activo && !confirm('¿Desactivar a este usuario? Se cerrarán sus sesiones.')) return;
+      setMsg('');
+      const { ok, d } = await post(`/mad/empresa/usuarios/${b.dataset.uestado}/estado`, { activo });
+      if (!ok) setMsg(d.error || 'No se pudo actualizar');
+      cargarUsuarios();
+    });
+  }catch(e){}
+}
+
+$('btnNuevoUsr').onclick = () => {
+  const p = $('panelNuevoUsr'); p.style.display = p.style.display === 'none' ? 'block' : 'none';
+};
+$('formUsuario').onsubmit = async (e) => {
+  e.preventDefault(); setMsg('');
+  const { ok, d } = await post('/mad/empresa/usuarios', { nombre: $('uNombre').value, usuario: $('uUsuario').value });
+  if (!ok){ setMsg(d.error || 'No se pudo crear el usuario'); return; }
+  mostrarCredencialUsr(d.usuario, d.password_temporal);
+  e.target.reset();
+  cargarUsuarios();
+};
+
+/* ───────── Eventos e inicio ───────── */
+$('btnVer').onclick = cargar;
+$('btnRefrescar').onclick = () => { cargar(); cargarMapa(); cargarUsuarios(); };
+document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => fijarRango(b.dataset.r));
+document.addEventListener('visibilitychange', () => { if (!document.hidden){ cargar(); cargarMapa(); } });
+
+(async () => {
+  const sesion = await MadAuth.iniciar({ rol:'empresa', titulo:'Portal de empresas' });
+  $('quien').textContent = sesion.nombre;
+  $('btnSalir').onclick = () => MadAuth.cerrarSesion();
+  fijarRango('mes');
+  cargarMapa();
+  cargarUsuarios();
+  setInterval(cargar, 30000);
+  setInterval(cargarMapa, 15000);
+})();
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Nueva solicitud — Sanitas</title>
 <meta name="robots" content="noindex, nofollow">
+<script src="/static/mad_auth.js"></script>
 
 <style>
   :root{
@@ -92,9 +93,17 @@ const TOKEN = location.pathname.split('/oferta/')[1]?.replace(/\/$/, '');
 
 const card = document.getElementById('card');
 
+// Si no hay sesión de doctor, se manda al login y se vuelve a este enlace
+MadAuth.paginaLogin = '/proveedor';
+
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 async function cargarOferta() {
   try {
-    const res = await fetch(`${API_BASE}/oferta/${TOKEN}/estado`);
+    const res = await MadAuth.fetch(`${API_BASE}/oferta/${TOKEN}/estado`);
     if (!res.ok) throw new Error('no encontrada');
     const data = await res.json();
 
@@ -120,7 +129,8 @@ function renderOferta(data) {
     <span class="badge-nueva">Nueva solicitud</span>
     <h1>${nombreServicio}</h1>
     <div class="detalle">
-      <div class="fila"><span class="k">Dirección</span><span class="v">${data.direccion || 'Ubicación compartida por el cliente'}</span></div>
+      <div class="fila"><span class="k">Distrito</span><span class="v">${esc(data.distrito || 'Zona no especificada')}</span></div>
+      ${data.programada_para ? `<div class="fila"><span class="k">Programado</span><span class="v">${esc(fmtProgramada(data.programada_para))}</span></div>` : ''}
       <div class="fila"><span class="k">Distancia</span><span class="v">${distanciaTexto}</span></div>
     </div>
     <div class="botones">
@@ -141,7 +151,7 @@ async function responder(accion) {
   (accion === 'aceptar' ? btnAceptar : btnRechazar).textContent = 'Enviando...';
 
   try {
-    const res = await fetch(`${API_BASE}/oferta/${TOKEN}/${accion}`, { method: 'POST' });
+    const res = await MadAuth.fetch(`${API_BASE}/oferta/${TOKEN}/${accion}`, { method: 'POST' });
     const data = await res.json();
 
     if (accion === 'aceptar' && data.status === 'ok') {

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Monitor MAD — Sanitas</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/static/mad_auth.js"></script>
+<style>
+  :root{
+    --navy:#003654; --teal:#00A9B7; --teal-dark:#007A87; --bg:#F4F7F9; --border:#DCE4E8;
+    --gray:#6B7A82; --ok:#2E9E5B; --warn:#E8A33D; --danger:#D64545; --blue:#2d6cdf;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--navy)}
+  header{background:linear-gradient(135deg,var(--navy),var(--teal-dark));color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{margin:0;font-size:17px}
+  .kpis{display:flex;gap:14px;flex-wrap:wrap;font-size:12px}
+  .kpi b{font-size:18px;display:block}
+  .layout{display:grid;grid-template-columns:400px 1fr;height:calc(100vh - 58px)}
+  @media(max-width:900px){.layout{grid-template-columns:1fr;height:auto}#map{height:50vh}}
+  .col{overflow-y:auto;padding:12px;border-right:1px solid var(--border)}
+  #map{height:100%}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin:14px 0 8px}
+  .sol{background:#fff;border:1px solid var(--border);border-left:4px solid var(--gray);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px}
+  .sol.sel{outline:2px solid var(--teal)}
+  .sol .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;color:#fff}
+  .muted{color:var(--gray);font-size:12px}
+  .prov{background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .acciones a{display:inline-block;text-decoration:none;font-size:12px;font-weight:600;padding:5px 9px;border-radius:6px;margin-left:4px}
+  .tel{background:var(--navy);color:#fff}
+  .wa{background:#25D366;color:#fff}
+  .vacio{color:var(--gray);font-size:13px;text-align:center;padding:16px}
+  .act{font-size:11px;color:var(--gray)}
+  header .act{color:#cfe3ea}
+
+  .pin-sol{
+    border-radius:50%; border:3px solid #fff; color:#fff; font-weight:700; font-size:11px;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,.35);
+  }
+  .pin-prov{
+    width:30px; height:30px; border-radius:50%; border:3px solid var(--c); background:#fff; color:var(--c);
+    font-weight:700; font-size:11px; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
+  }
+  .leyenda{ background:#fff; padding:8px 10px; border-radius:8px; font-size:11.5px; line-height:1.7;
+    box-shadow:0 1px 6px rgba(0,0,0,.25); }
+  .leyenda i{ display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:5px; vertical-align:-1px; }
+  .leyenda i.hueco{ background:#fff; border:2px solid; }
+  .btn-hdr{ background:#fff; color:var(--navy); border:none; border-radius:6px; padding:6px 10px;
+    font-weight:600; cursor:pointer; font-size:12px; }
+  .btn-hdr:disabled{ opacity:.6; }
+
+  .btn-liberar{ background:#fff; color:var(--danger); border:1.5px solid #f0c2bb; border-radius:6px;
+    padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; }
+  .btn-liberar:hover{ background:#fdecea; }
+  #modalLiberar{ display:none; position:fixed; inset:0; background:rgba(0,54,84,.45); z-index:2500;
+    align-items:center; justify-content:center; padding:16px; }
+  #modalLiberar .caja{ background:#fff; border-radius:12px; width:100%; max-width:440px; padding:18px; }
+  #modalLiberar select, #modalLiberar textarea{ width:100%; padding:9px; border:1px solid var(--border);
+    border-radius:6px; font-size:14px; margin-top:8px; font-family:inherit; }
+  #modalLiberar .aviso{ background:#fff8e6; border:1px solid #f0d58a; border-radius:8px; padding:9px 11px;
+    font-size:12.5px; margin-top:10px; }
+  #modalLiberar .botones{ display:flex; gap:8px; margin-top:12px; }
+  #modalLiberar .botones button{ flex:1; padding:11px; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
+
+  .lib-badge{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;
+    background:#eef1f5; color:var(--gray); text-decoration:none; margin-top:3px; }
+  .lib-badge.alerta{ background:#fdecea; color:var(--danger); border:1px solid #f0c2bb; }
+  #modalLib{ display:none; position:fixed; inset:0; background:rgba(0,54,84,.45); z-index:2600;
+    align-items:center; justify-content:center; padding:16px; }
+  #modalLib .caja{ background:#fff; border-radius:12px; width:100%; max-width:560px; max-height:85vh;
+    overflow-y:auto; padding:18px; }
+  #modalLib table{ width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px; }
+  #modalLib th{ background:var(--navy); color:#fff; text-align:left; padding:7px 8px; font-size:11.5px; }
+  #modalLib td{ padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitor Médico a Domicilio / Ambulancia</h1>
+  <div class="kpis">
+    <div class="kpi"><b id="kBuscando">0</b>Buscando</div>
+    <div class="kpi"><b id="kCurso">0</b>En curso</div>
+    <div class="kpi"><b id="kProg">0</b>Programados</div>
+    <div class="kpi"><b id="kRiesgo">0</b>Programados en riesgo</div>
+    <div class="kpi"><b id="kSinCob">0</b>Sin cobertura (24h)</div>
+    <div class="kpi"><b id="kDisp">0</b>Proveedores disponibles</div>
+    <div class="kpi"><b id="kAlerta">0</b>Doctores con alerta</div>
+    <div class="kpi act" id="ultimaAct"></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+    <span id="quien"></span>
+    <button class="btn-hdr" id="btnRefrescar">🔄 Actualizar</button>
+    <button class="btn-hdr" id="btnVerTodo">🎯 Ver todo</button>
+    <button id="btnNuevoServicio" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-weight:600;cursor:pointer">➕ Nuevo servicio</button>
+    <button id="btnAdmin" style="background:#fff;color:var(--navy);border:none;border-radius:6px;padding:6px 10px;font-weight:600;cursor:pointer">👥 Proveedores</button>
+    <button id="btnSalir" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:6px 10px;cursor:pointer">Salir</button>
+  </div>
+</header>
+<div class="layout">
+  <div class="col">
+    <h2>Solicitudes</h2>
+    <div id="listaSol"></div>
+    <h2 id="tituloProv">Proveedores</h2>
+    <div style="margin:-4px 0 6px"><button class="btn-hdr" id="btnVerTodosProv" style="background:#eef1f5;color:var(--navy);border:1px solid var(--border)"></button></div>
+    <div id="listaProv"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div id="modalAdmin" style="display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2000;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:90vh;overflow-y:auto;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <b style="font-size:16px">Proveedores y coordinadores</b>
+      <button id="btnCerrarAdmin" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <details style="margin-bottom:10px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">➕ Nueva empresa prestadora</summary>
+      <form id="formEmpresa" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <input id="eNombre" placeholder="Razón social" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <input id="eRuc" placeholder="RUC (opcional)" maxlength="11" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <input id="eUsuario" placeholder="Usuario de acceso (ej. clinicaabc)" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <input id="eContacto" placeholder="Nombre del contacto" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <button type="submit" style="grid-column:1/-1;padding:10px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Crear empresa y acceso</button>
+      </form>
+    </details>
+    <form id="formProveedor" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <input id="fNombre" placeholder="Nombre (ej. Dr. Juan Pérez)" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="fUsuario" placeholder="Usuario (ej. jperez)" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="fTelefono" placeholder="Celular (9 dígitos)" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="fCmp" placeholder="CMP (4 a 6 dígitos)" inputmode="numeric" maxlength="6" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <select id="fTipo" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <option value="MAD">Médico a domicilio</option>
+        <option value="AMBULANCIA">Ambulancia</option>
+        <option value="AMBOS">Ambos</option>
+      </select>
+      <select id="fEmpresa" style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px"></select>
+      <button type="submit" style="grid-column:1/-1;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Crear proveedor</button>
+    </form>
+    <div id="credencial" style="display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px"></div>
+    <div id="msgAdmin" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-bottom:6px"></div>
+    <div id="tablaUsuarios"></div>
+  </div>
+</div>
+
+<div id="modalServicio" style="display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:680px;max-height:92vh;overflow-y:auto;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b style="font-size:16px">Nuevo servicio (call center)</b>
+      <button id="btnCerrarServicio" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px">Se envía a los proveedores igual que un pedido del webchat. Los datos clínicos solo los ven el coordinador y el doctor que acepte.</div>
+    <form id="formServicio" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <select id="sTipo" style="padding:9px;border:1px solid var(--border);border-radius:6px"><option value="MAD">Médico a domicilio</option><option value="AMBULANCIA">Ambulancia</option></select>
+      <span></span>
+      <input id="sDni" placeholder="DNI del paciente (8 dígitos)" inputmode="numeric" maxlength="8" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sNombre" placeholder="Nombre completo del paciente" maxlength="120" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sEdad" placeholder="Edad (años)" type="number" min="0" max="120" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sCelular" placeholder="Celular del paciente (9 dígitos)" inputmode="numeric" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sDireccion" placeholder="Dirección exacta" maxlength="200" required style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sDistrito" placeholder="Distrito" maxlength="80" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="sReferencia" placeholder="Referencia (ej. frente al parque)" maxlength="200" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <div style="grid-column:1/-1">
+        <div class="muted" style="margin-bottom:4px">📍 Haz clic en el mapa para marcar el domicilio <span id="sPinEstado" style="color:var(--danger)">(falta marcar)</span></div>
+        <div id="mapaServicio" style="height:220px;border-radius:8px;border:1px solid var(--border)"></div>
+      </div>
+      <textarea id="sSintomas" rows="2" maxlength="500" placeholder="Síntomas" required style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px;font-family:inherit"></textarea>
+      <textarea id="sAntecedentes" rows="2" maxlength="500" placeholder="Antecedentes médicos (escribe «Ninguno» si no tiene)" required style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px;font-family:inherit"></textarea>
+      <input id="sCopago" type="number" step="0.01" min="0" max="9999" placeholder="Monto del copago (S/)" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <select id="sFormaPago" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+        <option value="">Forma de pago…</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="yape_plin">Yape / Plin</option>
+      </select>
+      <input id="sAlergias" placeholder="Alergias a medicamentos (escribe «Niega» si no tiene)" maxlength="300" required style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px">
+      <label style="grid-column:1/-1;font-size:13px"><input type="checkbox" id="sProgramar"> Programar para una fecha y hora</label>
+      <input id="sFecha" type="datetime-local" style="display:none;grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px">
+      <label style="grid-column:1/-1;font-size:13px"><input type="checkbox" id="sSms" checked> Enviar al paciente el enlace de seguimiento por SMS</label>
+      <div id="sError" style="grid-column:1/-1;color:var(--danger);font-size:12.5px;min-height:16px"></div>
+      <button type="submit" id="sEnviar" style="grid-column:1/-1;padding:11px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Enviar a proveedores</button>
+    </form>
+  </div>
+</div>
+
+<div id="modalLiberar">
+  <div class="caja">
+    <b id="lbTitulo" style="font-size:16px"></b>
+    <div class="muted" id="lbInfo" style="margin-top:4px"></div>
+    <div class="aviso" id="lbAvisoLlego" style="display:none">
+      ⚠️ El doctor marcó que <b>ya llegó al domicilio</b>. Confirma con el paciente que nadie lo está atendiendo antes de liberarlo.
+    </div>
+    <select id="lbMotivo">
+      <option value="sin_senal">El doctor perdió señal o no responde</option>
+      <option value="no_acude">El doctor no acude al domicilio</option>
+      <option value="doctor_solicito">El doctor pidió que lo liberen</option>
+      <option value="otro">Otro motivo (detallar)</option>
+    </select>
+    <textarea id="lbComentario" maxlength="300" rows="2" placeholder="Comentario (obligatorio si eliges «Otro motivo»)"></textarea>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px">
+      <input type="checkbox" id="lbAvisarPaciente" checked> Avisar al paciente por SMS
+    </label>
+    <div class="aviso">El doctor será desconectado y no recibirá este servicio de nuevo. El servicio se ofrecerá al siguiente doctor disponible.</div>
+    <div id="lbError" style="color:var(--danger);font-size:12.5px;min-height:18px;margin-top:8px"></div>
+    <div class="botones">
+      <button id="lbCancelar" style="background:#eef1f5;color:var(--navy)">Volver</button>
+      <button id="lbConfirmar" style="background:var(--danger);color:#fff">Liberar servicio</button>
+    </div>
+  </div>
+</div>
+
+<div id="modalLib">
+  <div class="caja">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b id="libTitulo" style="font-size:16px"></b>
+      <button id="libCerrar" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div class="muted" id="libSub" style="margin-top:4px">Últimos 90 días</div>
+    <table>
+      <thead><tr><th>Fecha</th><th>Servicio</th><th>Estaba</th><th>Motivo</th><th>Por</th></tr></thead>
+      <tbody id="libFilas"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const REFRESCO_MS = 10000;
+const MIN_SIN_SENAL = 5;
+
+const COLOR_SOL = {
+  buscando_proveedor:'#E8A33D', asignado:'#2d6cdf', en_camino:'#2d6cdf',
+  llego:'#007A87', en_atencion:'#007A87', sin_cobertura:'#D64545', programada:'#6f42c1'
+};
+const TEXTO_SOL = {
+  buscando_proveedor:'Buscando', asignado:'Asignado', en_camino:'En camino',
+  llego:'Llegó', en_atencion:'En atención', sin_cobertura:'Sin cobertura', programada:'Programado'
+};
+const COLOR_PROV = { disponible:'#2E9E5B', en_oferta:'#E8A33D', ocupado:'#2d6cdf', desconectado:'#9aa5ab' };
+const ESTADOS_LIBERABLES = ['asignado', 'en_camino', 'llego'];
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const digitos = s => String(s ?? '').replace(/\D/g, '');
+
+const map = L.map('map').setView([-12.0464, -77.0428], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(map);
+const capaSol = L.layerGroup().addTo(map);
+const capaProv = L.layerGroup().addTo(map);
+
+let datos = { solicitudes:[], proveedores:[] };
+let seleccionId = null;
+let primerAjuste = false;
+
+function minutosDesde(iso){
+  if (!iso) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+}
+function distKm(a, b){
+  const R = 6371, r = x => x * Math.PI / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
+}
+function sinSenal(p){ const m = minutosDesde(p.actualizado_en); return m === null || m > MIN_SIN_SENAL; }
+// Un doctor 'disponible' con señal antigua igual recibe ofertas (según su última posición) hasta este umbral
+function recibeOfertas(p){ const m = minutosDesde(p.actualizado_en); return m !== null && m <= (datos.umbral_senal_min || MIN_SIN_SENAL); }
+
+async function cargar(){
+  try{
+    const r = await MadAuth.fetch('/mad/monitor/datos', { cache:'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    datos = await r.json();
+    render();
+    document.getElementById('ultimaAct').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-PE');
+  }catch(e){
+    document.getElementById('ultimaAct').textContent = 'Sin conexión, reintentando…';
+  }
+}
+
+function render(){
+  const sols = datos.solicitudes, provs = datos.proveedores;
+  document.getElementById('kBuscando').textContent = sols.filter(s => s.estado === 'buscando_proveedor').length;
+  document.getElementById('kCurso').textContent = sols.filter(s => ['asignado','en_camino','llego','en_atencion'].includes(s.estado)).length;
+  document.getElementById('kSinCob').textContent = sols.filter(s => s.estado === 'sin_cobertura').length;
+  document.getElementById('kDisp').textContent = provs.filter(p => p.estado === 'disponible' && recibeOfertas(p)).length;
+  document.getElementById('kAlerta').textContent = provs.filter(p => p.alerta_lib).length;
+  document.getElementById('kProg').textContent = sols.filter(s => s.estado === 'programada').length;
+  document.getElementById('kRiesgo').textContent =
+    sols.filter(s => s.estado === 'programada' && s.cobertura_riesgo).length;
+
+  renderSolicitudes(sols);
+  renderProveedores(provs);
+  renderMapa(sols, provs);
+}
+
+function renderSolicitudes(sols){
+  const cont = document.getElementById('listaSol');
+  if (!sols.length){ cont.innerHTML = '<div class="vacio">No hay solicitudes activas</div>'; return; }
+  cont.innerHTML = sols.map(s => {
+    const color = COLOR_SOL[s.estado] || '#6B7A82';
+    const espera = minutosDesde(s.creado_en);
+    let quien = '';
+    if (s.proveedor_asignado){
+      const p = datos.proveedores.find(x => x.id === s.proveedor_id);
+      const m = p ? minutosDesde(p.actualizado_en) : null;
+      const senal = (m === null || m > MIN_SIN_SENAL)
+        ? ` <b style="color:var(--danger)">⚠️ sin señal hace ${m ?? '?'} min</b>`
+        : ` · señal hace ${m} min`;
+      const alertaLib = (p && p.alerta_lib)
+        ? ` <b style="color:var(--danger)">· 🔓 ${p.lib_7} liberaciones en 7 días</b>` : '';
+      quien = `👨‍⚕️ ${esc(s.proveedor_asignado)}${s.proveedor_cmp ? ' · CMP ' + esc(s.proveedor_cmp) : ''}${s.proveedor_empresa ? ' · 🏢 ' + esc(s.proveedor_empresa) : ''}${senal}${alertaLib}`;
+    } else if (s.ofrecido_a){
+      quien = `⏳ Ofrecido a ${esc(s.ofrecido_a)}`;
+    } else if (s.estado === 'programada'){
+      quien = s.cobertura_riesgo
+        ? '<b style="color:var(--danger)">⚠️ Sin doctores conectados cerca de este lugar</b>'
+        : '📅 Se buscará doctor poco antes de la hora';
+    } else if (s.estado === 'buscando_proveedor'){
+      quien = `🔎 Intento ${s.intentos} · radio ${(s.radio / 1000).toFixed(0)} km`;
+    }
+    const liberar = ESTADOS_LIBERABLES.includes(s.estado)
+      ? `<div style="margin-top:6px"><button class="btn-liberar" data-liberar="${s.id}">🔓 Liberar servicio</button></div>` : '';
+    const activar = s.estado === 'programada'
+      ? `<div style="margin-top:6px"><button class="btn-liberar" style="color:var(--teal-dark);border-color:var(--teal)" data-activar="${s.id}">▶️ Buscar doctor ahora</button></div>` : '';
+    return `
+      <div class="sol ${s.id === seleccionId ? 'sel' : ''}" style="border-left-color:${color}" data-id="${s.id}">
+        <div class="top">
+          <b>#${s.id} · ${s.tipo_servicio === 'AMBULANCIA' ? 'Ambulancia' : 'MAD'}</b>
+          <span class="badge" style="background:${color}">${TEXTO_SOL[s.estado] || esc(s.estado)}</span>
+        </div>
+        <div>${esc(s.direccion || 'Sin dirección')} — <b>${esc(s.distrito || '')}</b></div>
+        ${s.referencia ? `<div class="muted">Ref: ${esc(s.referencia)}</div>` : ''}
+        ${s.programada_para ? `<div class="muted"><b>📅 ${esc(fmtProgramada(s.programada_para))}</b></div>` : ''}
+        ${s.contacto_telefono ? `<div class="muted">Contacto en el lugar: ${esc(s.contacto_nombre || '')} · ${esc(s.contacto_telefono)}</div>` : ''}
+        ${s.reprogramaciones ? `<div class="muted">🔁 Reprogramado ${s.reprogramaciones} ${s.reprogramaciones === 1 ? 'vez' : 'veces'}</div>` : ''}
+        <div class="muted">${esc(s.cliente_nombre || 'Cliente')} · ${esc(s.cliente_telefono || '')} · ${espera ?? '?'} min${s.canal === 'callcenter' ? ' · 📞 Call center' : ''}</div>
+        ${(s.sintomas || s.alergias || s.antecedentes) ? `<div class="muted" style="background:#fff8e8;border-radius:6px;padding:5px 7px;margin-top:3px">
+          ${s.paciente_dni ? 'DNI ' + esc(s.paciente_dni) : ''}${s.paciente_edad != null ? ' · ' + esc(s.paciente_edad) + ' años' : ''}<br>
+          <b>Síntomas:</b> ${esc(s.sintomas || '—')}<br><b>Antecedentes:</b> ${esc(s.antecedentes || '—')}<br>
+          <b style="color:var(--danger)">Alergias:</b> ${esc(s.alergias || '—')}<br>
+          ${s.copago_monto != null ? `<b>Copago:</b> S/ ${Number(s.copago_monto).toFixed(2)} · ${esc(({efectivo:'Efectivo',tarjeta:'Tarjeta',yape_plin:'Yape/Plin'})[s.forma_pago] || '')}` : ''}</div>` : ''}
+        ${s.novedad ? `<div style="margin-top:4px;padding:5px 7px;border-radius:6px;font-size:12.5px;${['trafico','problema','direccion'].includes(s.novedad.tipo) ? 'background:#fdecea;color:var(--danger);font-weight:600' : 'background:#eef6f2'}">📣 ${esc(s.novedad.texto)} <span class="muted">· hace ${minutosDesde(s.novedad.creado_en) ?? '?'} min</span></div>` : ''}
+        <div class="muted">${quien}</div>
+        ${s.tracking_token ? `<div class="muted"><a href="/track/${esc(s.tracking_token)}" target="_blank">Ver tracking</a></div>` : ''}
+        ${liberar}${activar}
+      </div>`;
+  }).join('');
+  cont.querySelectorAll('.sol').forEach(el => el.onclick = () => seleccionar(Number(el.dataset.id)));
+  cont.querySelectorAll('[data-liberar]').forEach(b => b.onclick = (ev) => {
+    ev.stopPropagation();                       // que no seleccione la tarjeta
+    abrirLiberar(Number(b.dataset.liberar));
+  });
+  cont.querySelectorAll('[data-activar]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    if (!confirm('¿Empezar a buscar doctor ahora para este servicio programado?')) return;
+    const r = await MadAuth.fetch(`/mad/admin/solicitudes/${b.dataset.activar}/activar`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) alert(d.error || 'No se pudo activar');
+    cargar();
+  });
+}
+
+function insigniaLib(p){
+  if (!p.lib_30) return '';
+  return `<br><a href="#" class="lib-badge ${p.alerta_lib ? 'alerta' : ''}" data-lib="${p.id}"
+    title="Ver detalle de liberaciones">🔓 ${p.lib_7} en 7 días · ${p.lib_30} en 30 días${p.alerta_lib ? ' ⚠️' : ''}</a>`;
+}
+
+let verTodosProv = false;   // por defecto solo conectados
+function renderProveedores(provs){
+  const sel = datos.solicitudes.find(s => s.id === seleccionId);
+  const conLoc = provs.filter(p => p.lat != null);
+  const nDesc = conLoc.filter(p => p.estado === 'desconectado').length;
+  const btnTodos = document.getElementById('btnVerTodosProv');
+  btnTodos.textContent = verTodosProv ? 'Mostrar solo conectados' : `Mostrar todos (+${nDesc} desconectados)`;
+  btnTodos.style.display = (verTodosProv || nDesc) ? 'inline-block' : 'none';
+  let lista = conLoc.filter(p => verTodosProv || p.estado !== 'desconectado').map(p => ({ ...p, km: sel ? distKm(sel, p) : null }));
+  if (sel) lista.sort((a, b) => a.km - b.km);
+
+  document.getElementById('tituloProv').textContent = sel ? `Proveedores más cercanos a #${sel.id}` : 'Proveedores';
+  const cont = document.getElementById('listaProv');
+  if (!lista.length){ cont.innerHTML = '<div class="vacio">No hay proveedores conectados</div>'; return; }
+
+  cont.innerHTML = lista.map(p => {
+    const color = sinSenal(p) ? '#9aa5ab' : (COLOR_PROV[p.estado] || '#9aa5ab');
+    const m = minutosDesde(p.actualizado_en);
+    const tel = digitos(p.telefono);
+    return `
+      <div class="prov" data-pid="${p.id}">
+        <div>
+          <b>${esc(p.nombre)}</b> <span class="badge" style="background:${color}">${esc(p.estado)}</span><br>
+          <span class="muted">${p.km != null ? p.km.toFixed(1) + ' km · ' : ''}señal hace ${m ?? '?'} min</span>
+          ${insigniaLib(p)}
+        </div>
+        <div class="acciones">
+          ${tel ? `<a class="tel" href="tel:+${tel}">📞</a><a class="wa" href="https://wa.me/${tel}" target="_blank">WA</a>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  cont.querySelectorAll('.prov').forEach(el => el.onclick = (ev) => {
+    if (ev.target.closest('a')) return;   // no interferir con llamar, WhatsApp ni la insignia
+    const p = provs.find(x => String(x.id) === el.dataset.pid);
+    if (p && p.lat != null) map.setView([p.lat, p.lng], 15);
+  });
+  cont.querySelectorAll('[data-lib]').forEach(a => a.onclick = (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    abrirLiberaciones(Number(a.dataset.lib));
+  });
+}
+
+/* =========================================================
+   MAPA
+   ========================================================= */
+function iniciales(n){
+  return String(n || '?').replace(/^(Dr\.?|Dra\.?)\s+/i, '').split(' ').filter(Boolean)
+    .slice(0, 2).map(p => p[0].toUpperCase()).join('');
+}
+
+function pinSolicitud(s, sel){
+  const c = COLOR_SOL[s.estado] || '#6B7A82', t = sel ? 36 : 28;
+  return L.divIcon({ className:'', iconSize:[t, t], iconAnchor:[t/2, t/2],
+    html:`<div class="pin-sol" style="background:${c};width:${t}px;height:${t}px">${s.id}</div>` });
+}
+
+function pinProveedor(p){
+  const sin = sinSenal(p);
+  const c = sin ? '#9aa5ab' : (COLOR_PROV[p.estado] || '#9aa5ab');
+  return L.divIcon({ className:'', iconSize:[30, 30], iconAnchor:[15, 15],
+    html:`<div class="pin-prov" style="--c:${c};${sin ? 'border-style:dashed' : ''}">${esc(iniciales(p.nombre))}</div>` });
+}
+
+function puntosMapa(){
+  const pts = [];
+  datos.solicitudes.forEach(s => { if (s.lat != null) pts.push([s.lat, s.lng]); });
+  datos.proveedores.forEach(p => { if (p.lat != null) pts.push([p.lat, p.lng]); });
+  return pts;
+}
+
+function renderMapa(sols, provs){
+  capaSol.clearLayers(); capaProv.clearLayers();
+
+  sols.forEach(s => {
+    if (s.lat == null) return;
+    L.marker([s.lat, s.lng], { icon: pinSolicitud(s, s.id === seleccionId), zIndexOffset: 500 })
+      .bindTooltip(`#${s.id} · ${TEXTO_SOL[s.estado] || esc(s.estado)} · ${esc(s.distrito || '')}`)
+      .on('click', () => seleccionar(s.id))
+      .addTo(capaSol);
+  });
+
+  provs.forEach(p => {
+    if (p.lat == null) return;
+    const m = minutosDesde(p.actualizado_en);
+    L.marker([p.lat, p.lng], { icon: pinProveedor(p) })
+      .bindTooltip(`${esc(p.nombre)} · ${esc(p.estado)} · señal hace ${m ?? '?'} min`)
+      .addTo(capaProv);
+  });
+
+  if (!primerAjuste){
+    const pts = puntosMapa();
+    if (pts.length){ map.fitBounds(L.latLngBounds(pts), { padding:[40, 40] }); primerAjuste = true; }
+  }
+}
+
+function seleccionar(id){
+  seleccionId = (seleccionId === id) ? null : id;
+  const s = datos.solicitudes.find(x => x.id === seleccionId);
+  if (s && s.lat != null) map.setView([s.lat, s.lng], 13);
+  render();
+}
+
+/* Leyenda */
+const leyenda = L.control({ position:'bottomleft' });
+leyenda.onAdd = () => {
+  const d = L.DomUtil.create('div', 'leyenda');
+  d.innerHTML = `<b>Solicitudes</b> (círculo con número)<br>
+    <i style="background:#E8A33D"></i>Buscando <i style="background:#2d6cdf"></i>En curso
+    <i style="background:#007A87"></i>Atendiendo <i style="background:#6f42c1"></i>Programado
+    <i style="background:#D64545"></i>Sin cobertura<br>
+    <b>Doctores</b> (círculo blanco con iniciales)<br>
+    <i class="hueco" style="border-color:#2E9E5B"></i>Disponible <i class="hueco" style="border-color:#2d6cdf"></i>Ocupado
+    <i class="hueco" style="border-color:#E8A33D"></i>En oferta <i class="hueco" style="border-color:#9aa5ab"></i>Señal antigua (&gt;5 min)`;
+  return d;
+};
+leyenda.addTo(map);
+
+/* Botones del header */
+document.getElementById('btnRefrescar').onclick = async (e) => {
+  const b = e.currentTarget; b.disabled = true; b.textContent = '⏳ Actualizando…';
+  await cargar();
+  b.disabled = false; b.textContent = '🔄 Actualizar';
+};
+document.getElementById('btnVerTodo').onclick = () => {
+  const pts = puntosMapa();
+  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding:[40, 40] });
+};
+document.addEventListener('visibilitychange', () => { if (!document.hidden) cargar(); });
+
+/* =========================================================
+   LIBERAR SERVICIO
+   ========================================================= */
+let liberarId = null;
+
+function abrirLiberar(id){
+  const s = datos.solicitudes.find(x => x.id === id);
+  if (!s) return;
+  liberarId = id;
+  document.getElementById('lbTitulo').textContent = `Liberar servicio #${id}`;
+  document.getElementById('lbInfo').textContent =
+    `${s.proveedor_asignado || 'Doctor'} · ${TEXTO_SOL[s.estado] || s.estado} · ${s.distrito || ''}`;
+  document.getElementById('lbAvisoLlego').style.display = s.estado === 'llego' ? 'block' : 'none';
+  document.getElementById('lbMotivo').value = 'sin_senal';
+  document.getElementById('lbComentario').value = '';
+  document.getElementById('lbAvisarPaciente').checked = true;
+  document.getElementById('lbError').textContent = '';
+  document.getElementById('modalLiberar').style.display = 'flex';
+}
+
+document.getElementById('lbCancelar').onclick = () => {
+  document.getElementById('modalLiberar').style.display = 'none';
+};
+
+document.getElementById('lbConfirmar').onclick = async () => {
+  const motivo = document.getElementById('lbMotivo').value;
+  const comentario = document.getElementById('lbComentario').value.trim();
+  const err = document.getElementById('lbError');
+  if (motivo === 'otro' && !comentario){ err.textContent = 'Describe brevemente el motivo'; return; }
+
+  const btn = document.getElementById('lbConfirmar');
+  btn.disabled = true; btn.textContent = 'Liberando…'; err.textContent = '';
+  try{
+    const r = await MadAuth.fetch(`/mad/admin/solicitudes/${liberarId}/liberar`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo, comentario, avisar_paciente: document.getElementById('lbAvisarPaciente').checked })
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || 'No se pudo liberar el servicio'; return; }
+    document.getElementById('modalLiberar').style.display = 'none';
+    alert(d.busqueda && d.busqueda.status === 'ofrecido'
+      ? 'Servicio liberado y ofrecido a otro doctor.'
+      : 'Servicio liberado. No hay doctores disponibles cerca ahora; el sistema seguirá buscando y avisará si no hay cobertura.');
+    cargar();
+  }catch(e){
+    err.textContent = 'Error de conexión, intenta nuevamente';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Liberar servicio';
+  }
+};
+
+/* Detalle de liberaciones de un doctor */
+async function abrirLiberaciones(id){
+  document.getElementById('libTitulo').textContent = 'Cargando…';
+  document.getElementById('libFilas').innerHTML = '';
+  document.getElementById('modalLib').style.display = 'flex';
+  try{
+    const r = await MadAuth.fetch(`/mad/admin/proveedores/${id}/liberaciones`);
+    const d = await r.json();
+    if (!r.ok){ document.getElementById('libTitulo').textContent = d.error || 'Error'; return; }
+    document.getElementById('libTitulo').textContent = `Liberaciones de ${d.doctor}`;
+    document.getElementById('libFilas').innerHTML = d.liberaciones.length
+      ? d.liberaciones.map(x => `<tr>
+          <td>${new Date(x.fecha).toLocaleString('es-PE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</td>
+          <td>#${x.solicitud_id}</td>
+          <td>${esc(TEXTO_SOL[x.estado_anterior] || x.estado_anterior)}</td>
+          <td>${esc(x.motivo)}${x.comentario ? `<br><span class="muted">${esc(x.comentario)}</span>` : ''}</td>
+          <td>${esc(x.coordinador)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted" style="text-align:center;padding:14px">Sin liberaciones</td></tr>';
+  }catch(e){
+    document.getElementById('libTitulo').textContent = 'Error de conexión';
+  }
+}
+document.getElementById('libCerrar').onclick = () => { document.getElementById('modalLib').style.display = 'none'; };
+
+/* =========================================================
+   ADMINISTRACIÓN DE USUARIOS Y EMPRESAS
+   ========================================================= */
+function msgAdmin(t){ document.getElementById('msgAdmin').textContent = t || ''; }
+
+function mostrarCredencial(usuario, clave){
+  const box = document.getElementById('credencial');
+  box.innerHTML = '<b>Credenciales temporales</b> (se muestran una sola vez):<br>Usuario: <code id="cU"></code><br>Clave: <code id="cC"></code><br><span class="muted">Al ingresar deberá cambiar la clave y configurar Google Authenticator.</span>';
+  box.querySelector('#cU').textContent = usuario;
+  box.querySelector('#cC').textContent = clave;
+  box.style.display = 'block';
+}
+
+let empresas = [];
+
+async function cargarEmpresas(){
+  const r = await MadAuth.fetch('/mad/admin/empresas');
+  const d = await r.json();
+  empresas = d.empresas || [];
+  document.getElementById('fEmpresa').innerHTML =
+    '<option value="">Independiente (sin empresa)</option>' +
+    empresas.filter(e => e.activo).map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join('');
+}
+
+async function cargarUsuarios(){
+  const r = await MadAuth.fetch('/mad/admin/usuarios');
+  const d = await r.json();
+  const cont = document.getElementById('tablaUsuarios');
+  cont.innerHTML = (d.usuarios || []).map(u => {
+    const selEmp = u.rol === 'proveedor'
+      ? `<select data-asig="${u.proveedor_id}" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:6px;max-width:150px">
+           <option value="">Independiente</option>
+           ${empresas.map(e => `<option value="${e.id}" ${e.id === u.empresa_id ? 'selected' : ''}>${esc(e.nombre)}</option>`).join('')}
+         </select>` : '';
+    const etiquetaEmpresa = u.rol === 'empresa' ? ` · 🏢 ${esc(u.empresa || '')}` : '';
+    return `
+     <div class="prov">
+       <div>
+         <b>${esc(u.nombre)}</b> <span class="muted">@${esc(u.usuario)} · ${esc(u.rol)}${u.tipo_servicio ? ' · ' + esc(u.tipo_servicio) : ''}${u.cmp ? ' · CMP ' + esc(u.cmp) : ''}${etiquetaEmpresa}</span><br>
+         <span class="muted">${u.activo ? '✅ Activo' : '⛔ Inactivo'} · ${u.totp_activo ? '🔐 2FA activo' : '⚠️ Sin 2FA'}${u.bloqueado ? ' · 🔒 Bloqueado' : ''} · último ingreso: ${u.ultimo_login ? new Date(u.ultimo_login).toLocaleString('es-PE') : '—'}</span>
+       </div>
+       <div class="acciones">
+         ${selEmp}
+         <a href="#" class="tel" data-reset="${u.id}">Resetear</a>
+         <a href="#" class="${u.activo ? 'tel' : 'wa'}" style="${u.activo ? 'background:var(--danger)' : ''}" data-estado="${u.id}" data-activo="${u.activo ? 0 : 1}">${u.activo ? 'Desactivar' : 'Activar'}</a>
+       </div>
+     </div>`;
+  }).join('') || '<div class="vacio">Sin usuarios</div>';
+
+  cont.querySelectorAll('[data-reset]').forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    if (!confirm('¿Resetear clave y Google Authenticator? El usuario deberá configurarlo de nuevo.')) return;
+    const r = await MadAuth.fetch(`/mad/admin/usuarios/${a.dataset.reset}/reset`, { method:'POST' });
+    const d = await r.json();
+    if (r.ok) mostrarCredencial(d.usuario, d.password_temporal); else msgAdmin(d.error);
+    cargarUsuarios();
+  });
+  cont.querySelectorAll('[data-estado]').forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    const activo = a.dataset.activo === '1';
+    if (!activo && !confirm('¿Desactivar este usuario? Se cerrarán sus sesiones.')) return;
+    const r = await MadAuth.fetch(`/mad/admin/usuarios/${a.dataset.estado}/estado`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ activo })
+    });
+    const d = await r.json();
+    if (!r.ok) msgAdmin(d.error);
+    cargarUsuarios();
+  });
+  cont.querySelectorAll('[data-asig]').forEach(sel => sel.onchange = async () => {
+    const r = await MadAuth.fetch(`/mad/admin/proveedores/${sel.dataset.asig}/empresa`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ empresa_id: sel.value || null })
+    });
+    const d = await r.json();
+    if (!r.ok) msgAdmin(d.error);
+    cargarUsuarios();
+  });
+}
+
+document.getElementById('formEmpresa').onsubmit = async (e) => {
+  e.preventDefault(); msgAdmin('');
+  const r = await MadAuth.fetch('/mad/admin/empresas', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({
+      nombre: document.getElementById('eNombre').value,
+      ruc: document.getElementById('eRuc').value,
+      usuario: document.getElementById('eUsuario').value,
+      contacto: document.getElementById('eContacto').value,
+    })
+  });
+  const d = await r.json();
+  if (!r.ok){ msgAdmin(d.error); return; }
+  mostrarCredencial(d.usuario, d.password_temporal);
+  document.getElementById('credencial').insertAdjacentHTML('beforeend',
+    `<br><span class="muted">La empresa ingresa en: ${location.origin}/mad/empresa</span>`);
+  e.target.reset();
+  await cargarEmpresas();
+  cargarUsuarios();
+};
+
+document.getElementById('btnAdmin').onclick = async () => {
+  document.getElementById('modalAdmin').style.display = 'flex';
+  msgAdmin('');
+  await cargarEmpresas();
+  cargarUsuarios();
+};
+document.getElementById('btnCerrarAdmin').onclick = () => {
+  document.getElementById('modalAdmin').style.display = 'none';
+  document.getElementById('credencial').style.display = 'none';
+};
+document.getElementById('formProveedor').onsubmit = async (e) => {
+  e.preventDefault(); msgAdmin('');
+  const body = {
+    nombre: document.getElementById('fNombre').value,
+    usuario: document.getElementById('fUsuario').value,
+    telefono: document.getElementById('fTelefono').value,
+    cmp: document.getElementById('fCmp').value,
+    tipo_servicio: document.getElementById('fTipo').value,
+    empresa_id: document.getElementById('fEmpresa').value || null,
+  };
+  const r = await MadAuth.fetch('/mad/admin/proveedores', {
+    method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!r.ok){ msgAdmin(d.error); return; }
+  mostrarCredencial(d.usuario, d.password_temporal);
+  e.target.reset();
+  cargarUsuarios();
+};
+
+
+/* =========================================================
+   NUEVO SERVICIO DESDE EL MONITOR (call center)
+   ========================================================= */
+let mapaSrv = null, pinSrv = null, coordsSrv = null;
+function abrirNuevoServicio(){
+  document.getElementById('modalServicio').style.display = 'flex';
+  document.getElementById('sError').textContent = '';
+  if (!mapaSrv){
+    mapaSrv = L.map('mapaServicio').setView([-12.0464, -77.0428], 12);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(mapaSrv);
+    mapaSrv.on('click', (ev) => {
+      coordsSrv = ev.latlng;
+      if (!pinSrv) pinSrv = L.marker(ev.latlng).addTo(mapaSrv); else pinSrv.setLatLng(ev.latlng);
+      const e = document.getElementById('sPinEstado'); e.textContent = '(ubicación marcada ✓)'; e.style.color = 'var(--teal-dark)';
+    });
+  }
+  setTimeout(() => mapaSrv.invalidateSize(), 150);
+}
+document.getElementById('btnNuevoServicio').onclick = abrirNuevoServicio;
+document.getElementById('btnVerTodosProv').onclick = () => { verTodosProv = !verTodosProv; renderProveedores(datos.proveedores); };
+document.getElementById('btnCerrarServicio').onclick = () => { document.getElementById('modalServicio').style.display = 'none'; };
+document.getElementById('sProgramar').onchange = (e) => { document.getElementById('sFecha').style.display = e.target.checked ? 'block' : 'none'; };
+document.getElementById('formServicio').onsubmit = async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('sError'), btn = document.getElementById('sEnviar');
+  err.textContent = '';
+  if (!coordsSrv){ err.textContent = 'Marca la ubicación del paciente en el mapa'; return; }
+  const v = (id) => document.getElementById(id).value;
+  const programar = document.getElementById('sProgramar').checked;
+  if (programar && !v('sFecha')){ err.textContent = 'Elige la fecha y hora'; return; }
+  btn.disabled = true;
+  try {
+    const r = await MadAuth.fetch('/mad/admin/solicitudes', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        tipo_servicio: v('sTipo'), paciente_dni: v('sDni'), paciente_nombre: v('sNombre'),
+        paciente_edad: v('sEdad'), paciente_celular: v('sCelular'),
+        direccion: v('sDireccion'), distrito: v('sDistrito'), referencia: v('sReferencia'),
+        lat: coordsSrv.lat, lng: coordsSrv.lng,
+        sintomas: v('sSintomas'), antecedentes: v('sAntecedentes'), alergias: v('sAlergias'), copago_monto: v('sCopago'), forma_pago: v('sFormaPago'),
+        programada_para: programar ? v('sFecha') : null,
+        enviar_sms: document.getElementById('sSms').checked,
+      })
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || 'No se pudo crear el servicio'; return; }
+    e.target.reset();
+    document.getElementById('sFecha').style.display = 'none';
+    if (pinSrv){ mapaSrv.removeLayer(pinSrv); pinSrv = null; } coordsSrv = null;
+    const pe = document.getElementById('sPinEstado'); pe.textContent = '(falta marcar)'; pe.style.color = 'var(--danger)';
+    document.getElementById('modalServicio').style.display = 'none';
+    cargar();
+    alert(`Servicio #${d.solicitud_id} enviado a los proveedores.`);
+  } catch (ex) {
+    err.textContent = 'Sin conexión. Intenta de nuevo.';
+  } finally { btn.disabled = false; }
+};
+
+/* =========================================================
+   INICIO (requiere coordinador con 2FA)
+   ========================================================= */
+(async () => {
+  const sesion = await MadAuth.iniciar({ rol:'coordinador', titulo:'Monitor MAD' });
+  document.getElementById('quien').textContent = sesion.nombre;
+  document.getElementById('btnSalir').onclick = () => MadAuth.cerrarSesion();
+  cargar();
+  setInterval(cargar, REFRESCO_MS);
+})();
+</script>
+</body>
+</html>

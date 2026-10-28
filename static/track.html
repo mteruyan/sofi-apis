@@ -703,6 +703,7 @@ function render(data){
 
   // Textos con el nombre del médico y el tiempo estimado
   let principal = cfg.principal, secundario = cfg.secundario;
+  if (data.estado === 'buscando_proveedor' && data.empresa_confirmo){ principal = 'Un proveedor aceptó tu solicitud'; secundario = 'Estamos asignando a tu médico'; }
   if (nombre && hayProveedor){
     document.getElementById('avatarIniciales').textContent = iniciales(nombre);
     if (data.estado === 'asignado')    principal = `${nombre} tomó tu servicio`;

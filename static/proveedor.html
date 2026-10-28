@@ -200,6 +200,14 @@
     </header>
 
     <main>
+      <div id="avisoApk" style="display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+        📲 Hay una versión nueva de la app. <a href="/static/app/sanitas-proveedor.apk" style="color:var(--azul);font-weight:700">Descargar e instalar</a>
+      </div>
+      <div id="cardApk" class="card" style="display:none">
+        <b>📱 App para Android</b>
+        <p style="font-size:13px;color:var(--texto-mute);margin:6px 0 10px">Instala la app de Sanitas: comparte tu ubicación y te avisa de nuevas solicitudes aunque el celular esté bloqueado o la app minimizada.</p>
+        <a href="/static/app/sanitas-proveedor.apk" class="btn-hist" style="display:inline-block;text-decoration:none">Descargar app</a>
+      </div>
       <div id="cardInstalar" class="card" style="display:none">
         <b>📲 Instala la app</b>
         <p id="txtInstalar" style="font-size:13px;color:var(--texto-mute);margin:6px 0 10px"></p>
@@ -287,7 +295,7 @@
    CONFIG
    ========================================================= */
 const API_BASE = window.location.origin;
-const APP_VERSION = "2026-10-23.1";          // debe coincidir con MAD_APP_VERSION de main_mad.py
+const APP_VERSION = "2026-10-27.1";          // debe coincidir con MAD_APP_VERSION de main_mad.py
 const POLL_INTERVAL_MS = 8000;
 const UBICACION_INTERVAL_ACTIVO_MS = 10000;   // mientras está disponible: cada 10 s
 
@@ -386,6 +394,12 @@ async function consultarEstadoActual() {
 
 /* Versión nueva de la app: se recarga sola si el doctor está libre; si tiene oferta o servicio, avisa con un botón */
 function revisarVersion(data) {
+  // App Android: si hay un APK más nuevo se avisa (el APK se instala a mano)
+  if (NATIVO && data.apk_version) {
+    let mia = ''; try { mia = window.MadNativo.version(); } catch (e) {}
+    const aviso = document.getElementById('avisoApk');
+    if (aviso) aviso.style.display = (mia && mia !== data.apk_version) ? 'block' : 'none';
+  }
   if (!data.app_version || data.app_version === APP_VERSION) return;
   if (!data.oferta_pendiente && !data.servicio_activo) {
     let ya = null;
@@ -426,6 +440,7 @@ function renderContenido(data) {
   }
 
   if (data.servicio_activo) {
+    if (data.servicio_activo.estado === 'asignado') { try { if (navigator.vibrate) navigator.vibrate([400, 200, 400]); } catch (e) {} }
     cont.innerHTML = renderServicioActivo(data.servicio_activo);
     inicializarMapaServicio(data.servicio_activo);
     const btnInformar = document.getElementById("btnInformar");
@@ -694,10 +709,31 @@ function iniciarGeolocalizacion() {
   gestionarEnvioUbicacion();
 }
 
+/* App Android (APK): un servicio nativo comparte la ubicación y avisa de ofertas aunque la pantalla esté bloqueada */
+const NATIVO = !!window.MadNativo;
+function sincronizarNativo() {
+  if (!NATIVO || !proveedorId) return;
+  try {
+    if (disponible) {
+      const r = window.MadNativo.iniciar(localStorage.getItem('mad_token') || '', String(proveedorId));
+      if (r && r !== 'ok') mostrarAvisoNativo(r);
+    } else window.MadNativo.detener();
+  } catch (e) {}
+}
+function mostrarAvisoNativo(codigo) {
+  const el = document.getElementById('avisoUbic');
+  el.textContent = codigo === 'falta_ubicacion'
+    ? '📍 La app no tiene permiso de ubicación. Toca aquí y actívalo en Ajustes → Permisos → Ubicación → "Permitir siempre" o "Solo mientras se usa".'
+    : '🔔 Activa las notificaciones de la app para recibir solicitudes.';
+  el.style.display = 'block'; el.style.cursor = 'pointer';
+  el.onclick = () => { try { window.MadNativo.abrirAjustes(); } catch (e) {} };
+}
+
 function gestionarEnvioUbicacion() {
+  sincronizarNativo();
   if (intervaloUbicacion) clearInterval(intervaloUbicacion);
   intervaloUbicacion = null;
-  if (!disponible) return;
+  if (!disponible || NATIVO) return;          // en la app nativa el envío lo hace el servicio, no la página
   intervaloUbicacion = setInterval(enviarUbicacionActual, UBICACION_INTERVAL_ACTIVO_MS);
 }
 
@@ -716,6 +752,7 @@ async function enviarUbicacionActual() {
 }
 
 function actualizarAvisos() {
+  if (NATIVO) return;
   const el = document.getElementById('avisoUbic');
   let msg = '';
   if (disponible) {
@@ -895,6 +932,8 @@ async function darDeBajaPush() {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/proveedor-sw.js').catch(() => {});
 
 (function () {
+  if (NATIVO) return;                                         // dentro de la app Android no hay nada que instalar
+  if (/android/i.test(navigator.userAgent)) document.getElementById('cardApk').style.display = 'block';
   const esStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   if (esStandalone) return;                                   // ya está instalada
   const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);

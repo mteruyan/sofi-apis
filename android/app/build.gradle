@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'pe.sanitas.proveedor'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'pe.sanitas.proveedor'
+        minSdk 26
+        targetSdk 34
+        // Al publicar una versión nueva: subir versionCode (+1) y versionName,
+        // y poner el mismo versionName en la variable MAD_APK_VERSION de Cloud Run.
+        versionCode 2
+        versionName '1.1'
+        // Dirección del sistema (sin barra final)
+        buildConfigField 'String', 'BASE_URL', '"https://sntspe.com"'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Firma: la compilación en la nube (cloudbuild.yaml) entrega estas variables; desde Android Studio se usa el asistente.
+    signingConfigs {
+        release {
+            if (System.getenv('KEYSTORE_FILE')) {
+                storeFile file(System.getenv('KEYSTORE_FILE'))
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS') ?: 'sanitas'
+                keyPassword System.getenv('KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv('KEYSTORE_FILE')) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

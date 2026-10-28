@@ -68,15 +68,17 @@ WHATSAPP_URL = "sanitasperu.com/?ac=1"
 
 # Despacho
 TIMEOUT_OFERTA_SEGUNDOS = 120      # tiempo que tiene el doctor para aceptar o rechazar
-MAX_INTENTOS_ASIGNACION = 5        # después de esto la solicitud pasa a sin_cobertura
-INCREMENTO_RADIO_METROS = 2000     # cada reintento amplía el radio de búsqueda
-RADIO_MAXIMO_METROS = 15000
+MAX_INTENTOS_ASIGNACION = 6        # después de esto la solicitud pasa a sin_cobertura
+INCREMENTO_RADIO_METROS = 7500     # cada reintento amplía el radio de búsqueda
+RADIO_MAXIMO_METROS = 40000     # radios de búsqueda: 5, 12.5, 20, 27.5, 35 y 40 km
 ESPERA_REINTENTO_SIN_PROVEEDOR_SEGUNDOS = 45   # menor que el intervalo del scheduler (60 s)
 MAD_ALERTA_CELULARES = [c.strip() for c in os.environ.get("MAD_ALERTA_CELULARES", "").split(",") if c.strip()]
 # Cambiar este valor (y APP_VERSION en proveedor.html) cada vez que se publique una versión nueva del panel
-MAD_APP_VERSION = "2026-10-23.1"
+MAD_APP_VERSION = "2026-10-27.1"
 # Ubicación vieja tolerada: un doctor "disponible" recibe ofertas según su ÚLTIMA posición conocida mientras
 # no pase de este tiempo; pasado esto se desconecta solo. Con avisos push el doctor no necesita tener la app abierta.
+MAD_APK_VERSION = os.environ.get("MAD_APK_VERSION", "1.0")      # versión vigente de la app Android (APK)
+MAD_REABRIR_MIN = int(os.environ.get("MAD_REABRIR_MIN", "60"))   # minutos en que un servicio del call center sin cobertura se reabre si se conecta un doctor
 MAD_AUTODESCONEXION_MIN = int(os.environ.get("MAD_AUTODESCONEXION_MIN", "45"))
 MAD_SENAL_FRESCA_MIN = 5           # hasta aquí la posición se considera "en vivo"; los doctores con señal fresca van primero
 MAD_OFERTA_LINK_AL_PANEL = True    # True: el SMS de oferta lleva al panel (/proveedor); False: a /oferta/<token>
@@ -292,6 +294,27 @@ def _mad_crear_sesion(cur, usuario_id, tipo):
     return token
 
 
+MAD_DISPOSITIVO_DIAS = int(os.environ.get("MAD_DISPOSITIVO_DIAS", "30"))
+MAD_MAX_DISPOSITIVOS = 3          # celulares de confianza por usuario
+
+
+def _mad_crear_dispositivo(cur, usuario_id, etiqueta=None):
+    """Celular de confianza: permite entrar sin código de Google Authenticator por MAD_DISPOSITIVO_DIAS días.
+    Solo se entrega tras un código TOTP correcto. Guarda únicamente el hash del token."""
+    token = secrets.token_urlsafe(32)
+    cur.execute("""
+        UPDATE mad_dispositivos SET revocado = TRUE
+        WHERE usuario_id = %s AND NOT revocado
+          AND id NOT IN (SELECT id FROM mad_dispositivos WHERE usuario_id = %s AND NOT revocado AND expira_en > NOW()
+                         ORDER BY id DESC LIMIT %s)
+    """, (usuario_id, usuario_id, MAD_MAX_DISPOSITIVOS - 1))
+    cur.execute(f"""
+        INSERT INTO mad_dispositivos (usuario_id, token_hash, etiqueta, expira_en)
+        VALUES (%s, %s, %s, NOW() + INTERVAL '{MAD_DISPOSITIVO_DIAS} days')
+    """, (usuario_id, _mad_hash_token(token), (etiqueta or "")[:120]))
+    return token
+
+
 def _mad_token_de(request):
     auth = request.headers.get("Authorization", "")
     return auth[7:].strip() if auth.startswith("Bearer ") else ""
@@ -413,6 +436,28 @@ def handle_mad_login(request):
             conn.commit()
             return _mad_json({"error": "Usuario o clave incorrectos"}, 401)
 
+        # Celular de confianza (solo doctores): si el token es válido, no se pide el código de Authenticator
+        dispositivo_invalido = False
+        tok_disp = str(data.get("token_dispositivo") or "")
+        if tok_disp:
+            cur.execute("""
+                SELECT d.id, u.nombre, u.rol, u.proveedor_id
+                FROM mad_dispositivos d JOIN mad_usuarios u ON u.id = d.usuario_id
+                WHERE d.token_hash = %s AND d.usuario_id = %s AND NOT d.revocado AND d.expira_en > NOW()
+                  AND u.rol = 'proveedor' AND u.totp_activo AND NOT u.debe_cambiar_password
+            """, (_mad_hash_token(tok_disp), uid))
+            d = cur.fetchone()
+            if d:
+                cur.execute("UPDATE mad_dispositivos SET ultimo_uso = NOW() WHERE id = %s", (d[0],))
+                cur.execute("""UPDATE mad_usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_login = NOW()
+                               WHERE id = %s""", (uid,))
+                token_completo = _mad_crear_sesion(cur, uid, "completa")
+                _mad_audit(cur, uid, "login_dispositivo", f"usuario:{uid}")
+                conn.commit()
+                return _mad_json({"token": token_completo, "siguiente": "ok", "usuario": {
+                    "nombre": d[1], "usuario": usuario, "rol": d[2], "proveedor_id": d[3]}})
+            dispositivo_invalido = True
+
         # El contador de fallos NO se reinicia aquí, solo tras el código TOTP correcto
         token = _mad_crear_sesion(cur, uid, "parcial")
         conn.commit()
@@ -420,7 +465,7 @@ def handle_mad_login(request):
         cur.close(); conn.close()
 
     siguiente = "cambiar_password" if debe_cambiar else ("totp" if totp_activo else "enrolar_totp")
-    return _mad_json({"token_parcial": token, "siguiente": siguiente})
+    return _mad_json({"token_parcial": token, "siguiente": siguiente, "dispositivo_invalido": dispositivo_invalido})
 
 
 # ── Primer ingreso: cambiar la clave temporal ──
@@ -437,6 +482,7 @@ def handle_mad_cambiar_password(request):
     try:
         cur.execute("UPDATE mad_usuarios SET password_hash = %s, debe_cambiar_password = FALSE WHERE id = %s",
                     (hash_password(nueva), s["id"]))
+        cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (s["id"],))
         conn.commit()
     finally:
         cur.close(); conn.close()
@@ -516,11 +562,15 @@ def handle_mad_totp_verificar(request):
         """, (paso_valido, s["id"]))
         cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE token_hash = %s", (s["token_hash"],))
         token = _mad_crear_sesion(cur, s["id"], "completa")
+        token_dispositivo = None
+        if (request.get_json(force=True, silent=True) or {}).get("recordar") and s["rol"] == "proveedor":
+            token_dispositivo = _mad_crear_dispositivo(cur, s["id"], request.headers.get("User-Agent"))
+            _mad_audit(cur, s["id"], "dispositivo_confiable", f"usuario:{s['id']}")
         conn.commit()
     finally:
         cur.close(); conn.close()
 
-    return _mad_json({"token": token, "usuario": {
+    return _mad_json({"token": token, "token_dispositivo": token_dispositivo, "usuario": {
         "nombre": s["nombre"], "usuario": s["usuario"], "rol": s["rol"], "proveedor_id": s["proveedor_id"]
     }})
 
@@ -644,13 +694,22 @@ def _err(msg, code=400, **extra):
 ESTADOS_ABIERTOS = ('programada', 'buscando_proveedor', 'asignado', 'en_camino', 'llego', 'en_atencion')
 
 
+ESTADOS_EN_CURSO = ('buscando_proveedor', 'asignado', 'en_camino', 'llego', 'en_atencion')   # abiertos y no programados
+
+
 class DniConServicioAbierto(Exception):
+    mensaje = "Ya existe un servicio en curso para este DNI. No se puede generar otro hasta que termine o se cancele."
+
     def __init__(self, solicitud_id, estado):
-        super().__init__(f"DNI con servicio abierto #{solicitud_id} ({estado})")
+        super().__init__(f"Servicio abierto #{solicitud_id} ({estado})")
         self.solicitud_id, self.estado = solicitud_id, estado
 
 
-MSG_DNI_ABIERTO = "Ya existe un servicio en curso para este DNI. No se puede generar otro hasta que termine o se cancele."
+class CelularConServicioAbierto(DniConServicioAbierto):
+    mensaje = "Este celular ya tiene un servicio en curso. No se puede generar otro hasta que termine o se cancele."
+
+
+MSG_DNI_ABIERTO = DniConServicioAbierto.mensaje
 
 
 def crear_solicitud(telefono, lat, lng, tipo_servicio, destino_clinica_id=None,
@@ -675,6 +734,16 @@ def crear_solicitud(telefono, lat, lng, tipo_servicio, destino_clinica_id=None,
             if ya:
                 conn.rollback()
                 raise DniConServicioAbierto(ya[0], ya[1])
+        if not programada_para:
+            # Segunda barrera: un mismo celular no tiene dos servicios en curso a la vez (con o sin DNI).
+            # Los servicios programados a futuro no cuentan, para poder reservar y pedir otro ahora.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("mad_tel:" + str(telefono),))
+            cur.execute("""SELECT id, estado FROM solicitudes
+                           WHERE cliente_telefono = %s AND estado IN %s LIMIT 1""", (telefono, ESTADOS_EN_CURSO))
+            ya = cur.fetchone()
+            if ya:
+                conn.rollback()
+                raise CelularConServicioAbierto(ya[0], ya[1])
         cur.execute("""
             INSERT INTO solicitudes (cliente_telefono, cliente_nombre, tipo_servicio, origen,
                                      origen_direccion_texto, origen_distrito, origen_referencia,
@@ -779,7 +848,7 @@ def handle_crear_solicitud(request):
                                     direccion, distrito, referencia, cliente_nombre,
                                     programada_para, contacto_nombre, contacto_tel, extra=extra)
     except DniConServicioAbierto as e:
-        return _err(MSG_DNI_ABIERTO, 409, solicitud_id=e.solicitud_id, estado=e.estado)
+        return _err(e.mensaje, 409, solicitud_id=e.solicitud_id, estado=e.estado)
     return (json.dumps(resultado, ensure_ascii=False), 200, HEADERS)
 
 
@@ -872,7 +941,7 @@ def handle_mad_admin_crear_solicitud(request):
                                     nombre, programada_para, None, None,
                                     extra=extra, notificar_cliente=bool(data.get("enviar_sms", True)))
     except DniConServicioAbierto as e:
-        return _mad_json({"error": f"{MSG_DNI_ABIERTO} (servicio #{e.solicitud_id}, estado: {e.estado})"}, 409)
+        return _mad_json({"error": f"{e.mensaje} (servicio #{e.solicitud_id}, estado: {e.estado})"}, 409)
     return _mad_json(resultado, 201)
 
 
@@ -1162,17 +1231,17 @@ def handle_recalibrar_eta(request):
 # DESPACHO — búsqueda y ofertas
 # ═════════════════════════════════════════════════════════════
 def buscar_y_ofrecer_proveedor(solicitud_id, radio_metros=None):
-    """Ofrece la solicitud al doctor disponible más cercano (con señal reciente) que no la
-    haya rechazado, dejado expirar o sido excluido. Solo actúa si la solicitud sigue en
-    'buscando_proveedor' y no tiene ya una oferta pendiente."""
+    """Ofrece la solicitud a la EMPRESA que corresponde según la tabla de pesos (una tabla para médico a
+    domicilio y otra para ambulancia). La empresa acepta y luego asigna a uno de sus doctores.
+    Solo participan empresas con al menos un doctor conectado (señal reciente) dentro de RADIO_MAXIMO_METROS
+    y que no hayan rechazado o dejado vencer esta solicitud. Solo actúa si la solicitud sigue en
+    'buscando_proveedor', sin oferta pendiente y sin empresa que ya la aceptó. (radio_metros ya no se usa.)"""
     ahora = datetime.now(LIMA_TZ).replace(tzinfo=None)
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # Bloquea la solicitud: evita dos búsquedas simultáneas sobre la misma (orden: solicitud → oferta → doctor)
         cur.execute("""
-            SELECT origen, tipo_servicio, origen_distrito, COALESCE(radio_busqueda_metros, 5000),
-                   programada_para, estado
+            SELECT origen, tipo_servicio, origen_distrito, programada_para, estado, empresa_aceptada_en
             FROM solicitudes WHERE id = %s
             FOR UPDATE
         """, (solicitud_id,))
@@ -1180,64 +1249,233 @@ def buscar_y_ofrecer_proveedor(solicitud_id, radio_metros=None):
         if not row_sol:
             conn.rollback()
             return {'status': 'error', 'mensaje': 'Solicitud no encontrada'}
-        origen, tipo_servicio, distrito, radio_bd, programada_para, estado = row_sol
+        origen, tipo_servicio, distrito, programada_para, estado, empresa_aceptada_en = row_sol
 
         if estado != 'buscando_proveedor':
             conn.rollback()
             return {'status': 'no_aplica', 'estado': estado}
+        if empresa_aceptada_en is not None:
+            conn.rollback()
+            return {'status': 'esperando_asignacion'}
 
         cur.execute("""
-            SELECT 1 FROM solicitudes_ofertas WHERE solicitud_id = %s AND estado = 'pendiente' LIMIT 1
-        """, (solicitud_id,))
+            SELECT 1 FROM solicitudes_ofertas_empresa WHERE solicitud_id = %s AND estado = 'pendiente'
+            UNION ALL
+            SELECT 1 FROM solicitudes_ofertas WHERE solicitud_id = %s AND estado = 'pendiente'
+            LIMIT 1
+        """, (solicitud_id, solicitud_id))
         if cur.fetchone():
             conn.rollback()
             return {'status': 'ya_ofrecido'}
 
-        radio = radio_metros or radio_bd
         cur.execute("UPDATE solicitudes SET ultima_busqueda_en = %s WHERE id = %s", (ahora, solicitud_id))
 
-        cur.execute("""
-            SELECT p.id, p.telefono, ST_Distance(pe.ubicacion, %s::geography) AS distancia
-            FROM proveedores p
+        cur.execute(f"""
+            SELECT e.id, e.nombre, e.celular_alertas, pr.peso,
+                   MIN(ST_Distance(pe.ubicacion, %s::geography)) AS distancia
+            FROM mad_empresas e
+            JOIN mad_empresas_prioridad pr ON pr.empresa_id = e.id AND pr.tipo_servicio = %s AND pr.peso > 0
+            JOIN proveedores p ON p.empresa_id = e.id AND p.tipo_servicio IN (%s, 'AMBOS')
+            JOIN mad_usuarios u ON u.proveedor_id = p.id AND u.activo
             JOIN proveedores_estado pe ON pe.proveedor_id = p.id
-            WHERE pe.estado = 'disponible'
-              AND p.tipo_servicio IN (%s, 'AMBOS')
-              AND pe.actualizado_en > NOW() - %s
-              AND ST_DWithin(pe.ubicacion, %s::geography, %s)
-              AND p.id NOT IN (SELECT proveedor_id FROM solicitudes_proveedores_excluidos
-                               WHERE solicitud_id = %s)
-              AND p.id NOT IN (SELECT proveedor_id FROM solicitudes_ofertas
+            WHERE e.activo
+              AND pe.estado = 'disponible' AND pe.ubicacion IS NOT NULL
+              AND pe.actualizado_en > NOW() - INTERVAL '{MAD_AUTODESCONEXION_MIN} minutes'
+              AND ST_DWithin(pe.ubicacion, %s::geography, {RADIO_MAXIMO_METROS})
+              AND p.id NOT IN (SELECT proveedor_id FROM solicitudes_proveedores_excluidos WHERE solicitud_id = %s)
+              AND e.id NOT IN (SELECT empresa_id FROM solicitudes_ofertas_empresa
                                WHERE solicitud_id = %s AND estado IN ('rechazada', 'expirada'))
-            ORDER BY (pe.actualizado_en < NOW() - %s) ASC, distancia ASC
+            GROUP BY e.id, e.nombre, e.celular_alertas, pr.peso
+            ORDER BY pr.peso DESC, distancia ASC
             LIMIT 1
-            FOR UPDATE OF pe SKIP LOCKED
-        """, (origen, tipo_servicio, timedelta(minutes=MAD_AUTODESCONEXION_MIN),
-              origen, radio, solicitud_id, solicitud_id, timedelta(minutes=MAD_SENAL_FRESCA_MIN)))
+        """, (origen, tipo_servicio, tipo_servicio, origen, solicitud_id, solicitud_id))
         row = cur.fetchone()
 
         if not row:
             conn.commit()   # guarda ultima_busqueda_en; el reintento lo hace revisar-timeouts
-            return {'status': 'sin_proveedores', 'radio_usado': radio}
+            return {'status': 'sin_proveedores'}
 
-        proveedor_id, telefono_proveedor, distancia = row
-
+        empresa_id, empresa_nombre, celular_alertas, peso, distancia = row
         cur.execute("""
-            INSERT INTO solicitudes_ofertas (solicitud_id, proveedor_id, estado)
-            VALUES (%s, %s, 'pendiente') RETURNING id, oferta_token
-        """, (solicitud_id, proveedor_id))
-        oferta_id, oferta_token = cur.fetchone()
-
-        cur.execute("UPDATE proveedores_estado SET estado = 'en_oferta' WHERE proveedor_id = %s", (proveedor_id,))
+            INSERT INTO solicitudes_ofertas_empresa (solicitud_id, empresa_id, estado)
+            VALUES (%s, %s, 'pendiente') RETURNING id
+        """, (solicitud_id, empresa_id))
+        oferta_emp_id = cur.fetchone()[0]
         conn.commit()
     finally:
         cur.close(); conn.close()
 
-    enviar_oferta_wsp(telefono_proveedor, oferta_token, tipo_servicio, distrito, programada_para)
-    nombre_serv = "Médico a domicilio" if tipo_servicio == "MAD" else "Ambulancia"
-    cuando = f" · {programada_para.astimezone(LIMA_TZ).strftime('%d/%m %H:%M')}" if programada_para else ""
-    enviar_push_proveedor(proveedor_id, f"Nueva solicitud: {nombre_serv}",
-                          f"{(distrito or 'Zona no especificada').title()}{cuando}. Toca para responder.", tag="oferta")
-    return {'status': 'ofrecido', 'oferta_id': oferta_id, 'proveedor_id': proveedor_id}
+    avisar_empresa_oferta(celular_alertas, tipo_servicio, distrito, programada_para)
+    return {'status': 'ofrecido', 'oferta_empresa_id': oferta_emp_id, 'empresa_id': empresa_id}
+
+
+# ═════════════════════════════════════════════════════════════
+# OFERTAS A EMPRESAS: la empresa acepta y asigna a uno de sus doctores
+# Tablas: solicitudes_ofertas_empresa, mad_empresas_prioridad (pesos), mad_empresas.celular_alertas
+# ═════════════════════════════════════════════════════════════
+MAD_OFERTA_EMPRESA_SEG = int(os.environ.get("MAD_OFERTA_EMPRESA_SEG", "120"))   # plazo para aceptar o rechazar
+MAD_ASIGNAR_MIN = int(os.environ.get("MAD_ASIGNAR_MIN", "5"))                   # plazo para asignar doctor tras aceptar
+
+
+def avisar_empresa_oferta(celular, tipo_servicio, distrito, programada_para=None):
+    numero = _normalizar_celular_pe(celular) if celular else None
+    if not numero:
+        return
+    nombre_serv = "Medico a domicilio" if tipo_servicio == "MAD" else "Ambulancia"
+    zona = f" en {distrito.title()}" if distrito else ""
+    cuando = f" PROGRAMADA {programada_para.astimezone(LIMA_TZ).strftime('%d/%m %H:%M')}" if programada_para else ""
+    enviar_danaconnect(numero, f"Sanitas: Nueva solicitud{cuando} de {nombre_serv}{zona}. Ingresa a tu portal para aceptarla: {_base_url()}/mad/empresa")
+    sms_aviso(numero, "oferta empresa")
+
+
+def aceptar_oferta_empresa(oferta_id, empresa_id, usuario_id):
+    """La empresa se compromete con el servicio; falta que asigne un doctor (plazo MAD_ASIGNAR_MIN)."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT solicitud_id FROM solicitudes_ofertas_empresa WHERE id = %s AND empresa_id = %s",
+                    (oferta_id, empresa_id))
+        r = cur.fetchone()
+        if not r:
+            return {'status': 'error', 'mensaje': 'Oferta no encontrada'}
+        solicitud_id = r[0]
+        cur.execute("SELECT estado FROM solicitudes WHERE id = %s FOR UPDATE", (solicitud_id,))
+        if cur.fetchone()[0] != 'buscando_proveedor':
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'Esta solicitud ya no está disponible'}
+        cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'aceptada', respondido_en = NOW(), usuario_id = %s
+                       WHERE id = %s AND estado = 'pendiente' RETURNING id""", (usuario_id, oferta_id))
+        if not cur.fetchone():
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'La oferta venció o ya fue respondida'}
+        cur.execute("UPDATE solicitudes SET empresa_id = %s, empresa_aceptada_en = NOW() WHERE id = %s",
+                    (empresa_id, solicitud_id))
+        cur.execute("""INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+                       VALUES (%s, 'buscando_proveedor', 'buscando_proveedor', 'empresa_acepto')""", (solicitud_id,))
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return {'status': 'ok', 'solicitud_id': solicitud_id}
+
+
+def rechazar_oferta_empresa(oferta_id, empresa_id, usuario_id):
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT solicitud_id FROM solicitudes_ofertas_empresa WHERE id = %s AND empresa_id = %s",
+                    (oferta_id, empresa_id))
+        r = cur.fetchone()
+        if not r:
+            return {'status': 'error', 'mensaje': 'Oferta no encontrada'}
+        solicitud_id = r[0]
+        cur.execute("SELECT estado FROM solicitudes WHERE id = %s FOR UPDATE", (solicitud_id,))
+        estado_sol = cur.fetchone()[0]
+        cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'rechazada', respondido_en = NOW(), usuario_id = %s
+                       WHERE id = %s AND estado = 'pendiente' RETURNING id""", (usuario_id, oferta_id))
+        if not cur.fetchone():
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'La oferta venció o ya fue respondida'}
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    resultado = buscar_y_ofrecer_proveedor(solicitud_id) if estado_sol == 'buscando_proveedor' else None
+    return {'status': 'rechazada', 'siguiente': resultado}
+
+
+def asignar_doctor_empresa(solicitud_id, proveedor_id, empresa_id, usuario_id):
+    """La empresa asigna uno de sus doctores disponibles. El doctor recibe el servicio ya asignado."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT estado, empresa_id, empresa_aceptada_en IS NOT NULL, tipo_servicio, origen_distrito, programada_para
+                       FROM solicitudes WHERE id = %s FOR UPDATE""", (solicitud_id,))
+        r = cur.fetchone()
+        if not r:
+            return {'status': 'error', 'mensaje': 'Solicitud no encontrada'}
+        estado, emp, aceptada, tipo, distrito, programada_para = r
+        if estado != 'buscando_proveedor' or emp != empresa_id or not aceptada:
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'Esta solicitud ya no está pendiente de asignación en tu empresa (puede haber vencido el plazo)'}
+
+        cur.execute("""SELECT p.tipo_servicio, p.telefono, pe.estado
+                       FROM proveedores p JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+                       WHERE p.id = %s AND p.empresa_id = %s FOR UPDATE OF pe""", (proveedor_id, empresa_id))
+        d = cur.fetchone()
+        if not d:
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'Ese doctor no pertenece a tu empresa'}
+        tipo_doc, tel_doc, estado_doc = d
+        if tipo_doc not in (tipo, 'AMBOS'):
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'Ese doctor no atiende este tipo de servicio'}
+        if estado_doc != 'disponible':
+            conn.rollback()
+            return {'status': 'error', 'mensaje': 'Ese doctor no está disponible en línea (debe estar conectado y libre)'}
+
+        cur.execute("""UPDATE solicitudes
+                       SET estado = 'asignado', proveedor_id = %s, asignado_en = NOW(), empresa_aceptada_en = NULL
+                       WHERE id = %s""", (proveedor_id, solicitud_id))
+        cur.execute("UPDATE proveedores_estado SET estado = 'ocupado' WHERE proveedor_id = %s", (proveedor_id,))
+        cur.execute("""INSERT INTO solicitudes_ofertas (solicitud_id, proveedor_id, estado, respondido_en)
+                       VALUES (%s, %s, 'aceptada', NOW())""", (solicitud_id, proveedor_id))
+        cur.execute("""INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+                       VALUES (%s, 'buscando_proveedor', 'asignado', 'empresa')""", (solicitud_id,))
+        _mad_audit(cur, usuario_id, "empresa_asigna", f"solicitud:{solicitud_id}", {"proveedor_id": proveedor_id})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    notificar_cliente_proveedor_asignado(solicitud_id)
+    nombre_serv = "Médico a domicilio" if tipo == "MAD" else "Ambulancia"
+    enviar_push_proveedor(proveedor_id, f"Te asignaron un servicio: {nombre_serv}",
+                          f"{(distrito or 'Zona no especificada').title()}. Abre la app para ver los datos.", tag="asignado")
+    numero = _normalizar_celular_pe(tel_doc)
+    if numero:
+        enviar_danaconnect(numero, f"Sanitas: Te asignaron un servicio de {nombre_serv.replace('é','e')} en {(distrito or '').title()}. Abre la app: {_base_url()}/proveedor")
+        sms_aviso(numero, "servicio asignado")
+    return {'status': 'ok', 'solicitud_id': solicitud_id}
+
+
+def _vencer_ofertas_empresa():
+    """(1) Ofertas a empresa sin respuesta en MAD_OFERTA_EMPRESA_SEG → pasan a la siguiente empresa.
+    (2) Servicios aceptados por una empresa que no asignó doctor en MAD_ASIGNAR_MIN → vuelven a la búsqueda."""
+    reofrecer = []
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT o.id, o.solicitud_id FROM solicitudes_ofertas_empresa o
+            JOIN solicitudes s ON s.id = o.solicitud_id
+            WHERE o.estado = 'pendiente' AND o.ofrecido_en < NOW() - INTERVAL '{MAD_OFERTA_EMPRESA_SEG} seconds'
+        """)
+        for oid, sid in cur.fetchall():
+            cur.execute("SELECT estado FROM solicitudes WHERE id = %s FOR UPDATE", (sid,))
+            est = cur.fetchone()
+            cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'expirada', respondido_en = NOW()
+                           WHERE id = %s AND estado = 'pendiente' RETURNING id""", (oid,))
+            if cur.fetchone() and est and est[0] == 'buscando_proveedor':
+                reofrecer.append(sid)
+
+        cur.execute(f"""
+            SELECT s.id, s.empresa_id FROM solicitudes s
+            WHERE s.estado = 'buscando_proveedor' AND s.empresa_aceptada_en IS NOT NULL
+              AND s.empresa_aceptada_en < NOW() - INTERVAL '{MAD_ASIGNAR_MIN} minutes'
+        """)
+        for sid, emp in cur.fetchall():
+            cur.execute("SELECT estado FROM solicitudes WHERE id = %s FOR UPDATE", (sid,))
+            est = cur.fetchone()
+            if not est or est[0] != 'buscando_proveedor':
+                continue
+            # La oferta aceptada pasa a 'expirada' para que esa empresa no vuelva a recibir este servicio
+            cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'expirada'
+                           WHERE solicitud_id = %s AND empresa_id = %s AND estado = 'aceptada'""", (sid, emp))
+            cur.execute("UPDATE solicitudes SET empresa_aceptada_en = NULL, empresa_id = NULL WHERE id = %s", (sid,))
+            cur.execute("""INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+                           VALUES (%s, 'buscando_proveedor', 'buscando_proveedor', 'sistema_sin_asignar')""", (sid,))
+            reofrecer.append(sid)
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    resultados = []
+    for sid in reofrecer:
+        resultados.append({"solicitud_id": sid, "resultado": buscar_y_ofrecer_proveedor(sid)})
+    return resultados
 
 
 def aceptar_oferta(oferta_id):
@@ -1437,6 +1675,144 @@ def handle_servir_tracking(request, tracking_token=None):
     return _servir_html("track.html")
 
 
+# ═════════════════════════════════════════════════════════════
+# UBICACIÓN CONFIRMADA POR EL CLIENTE
+# El monitor pide la ubicación (SMS con enlace), el cliente marca su domicilio en un mapa
+# y el monitor la recibe para usarla en el servicio. Tabla: mad_ubicaciones_pedidas.
+# Rutas públicas bajo /track/u/<token> (el token funciona como llave, igual que /track/).
+# ═════════════════════════════════════════════════════════════
+MAD_UBICACION_VIGENCIA_MIN = 60
+MAD_UBICACION_MAX_PEDIDOS_HORA = 4      # por celular
+MAD_UBICACION_MAX_ENVIOS = 5            # veces que el cliente puede volver a marcar
+
+
+@con_log_errores
+def handle_mad_admin_pedir_ubicacion(request):
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    tel = re.sub(r"\D", "", str(data.get("telefono") or ""))
+    if len(tel) == 9 and tel.startswith("9"):
+        tel = "51" + tel
+    if not re.fullmatch(r"51\d{9}", tel):
+        return _mad_json({"error": "Escribe el celular del cliente (9 dígitos, empieza con 9)"}, 400)
+    direccion = re.sub(r"\s+", " ", str(data.get("direccion") or "")).strip()[:200] or None
+    try:
+        clat, clng = float(data.get("centro_lat")), float(data.get("centro_lng"))
+        if not (PERU_LAT[0] <= clat <= PERU_LAT[1] and PERU_LNG[0] <= clng <= PERU_LNG[1]):
+            clat = clng = None
+    except (TypeError, ValueError):
+        clat = clng = None
+
+    token = str(uuid.uuid4())
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT COUNT(*) FROM mad_ubicaciones_pedidas
+                       WHERE telefono = %s AND creado_en > NOW() - INTERVAL '1 hour'""", (tel,))
+        if cur.fetchone()[0] >= MAD_UBICACION_MAX_PEDIDOS_HORA:
+            return _mad_json({"error": "Ya se envió el enlace varias veces a este celular. Espera un momento."}, 429)
+        cur.execute(f"""
+            INSERT INTO mad_ubicaciones_pedidas (token, telefono, creado_por, expira_en, direccion_texto, centro_lat, centro_lng)
+            VALUES (%s, %s, %s, NOW() + INTERVAL '{MAD_UBICACION_VIGENCIA_MIN} minutes', %s, %s, %s)
+            RETURNING id
+        """, (token, tel, s["id"], direccion, clat, clng))
+        pedido_id = cur.fetchone()[0]
+        _mad_audit(cur, s["id"], "ubicacion_pedir", f"ubicacion:{pedido_id}", {"destino_final": tel[-3:]})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    numero = _normalizar_celular_pe(tel)
+    enviar_danaconnect(numero, f"Sanitas: Para enviarte al medico, marca en el mapa donde estas (toma 1 minuto): {_base_url()}/track/u/{token}")
+    sms_aviso(numero, "mad pedir ubicacion")
+    return _mad_json({"ok": True, "pedido_id": pedido_id, "vigencia_min": MAD_UBICACION_VIGENCIA_MIN}, 201)
+
+
+@con_log_errores
+def handle_mad_admin_estado_ubicacion(request, pedido_id):
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    if not str(pedido_id).isdigit():
+        return _mad_json({"error": "Pedido inválido"}, 400)
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT lat, lng, precision_m, respondida_en, expira_en < NOW()
+                       FROM mad_ubicaciones_pedidas WHERE id = %s""", (int(pedido_id),))
+        row = cur.fetchone()
+    finally:
+        cur.close(); conn.close()
+    if not row:
+        return _mad_json({"error": "Pedido no encontrado"}, 404)
+    lat, lng, prec, resp, expirada = row
+    if lat is not None:
+        return _mad_json({"estado": "respondida", "lat": lat, "lng": lng,
+                          "precision_m": round(prec) if prec is not None else None, "respondida_en": _iso(resp)})
+    return _mad_json({"estado": "expirada" if expirada else "pendiente"})
+
+
+def _ubicacion_por_token(cur, token):
+    if not _uuid_valido(token):
+        return None
+    cur.execute("""SELECT id, direccion_texto, centro_lat, centro_lng, intentos, expira_en < NOW(), lat IS NOT NULL
+                   FROM mad_ubicaciones_pedidas WHERE token = %s""", (token,))
+    return cur.fetchone()
+
+
+def handle_ubicacion_info(token):
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        row = _ubicacion_por_token(cur, token)
+    finally:
+        cur.close(); conn.close()
+    if not row:
+        return _err("Enlace inválido", 404)
+    _id, direccion, clat, clng, intentos, expirada, ya = row
+    return (json.dumps({"direccion": direccion, "centro": {"lat": clat, "lng": clng} if clat is not None else None,
+                        "expirada": bool(expirada), "ya_enviada": bool(ya)}, ensure_ascii=False), 200, HEADERS)
+
+
+@con_log_errores
+def handle_ubicacion_enviar(request, token):
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        lat, lng = float(data.get("lat")), float(data.get("lng"))
+    except (TypeError, ValueError):
+        return _err("Marca tu ubicación en el mapa")
+    if not (PERU_LAT[0] <= lat <= PERU_LAT[1] and PERU_LNG[0] <= lng <= PERU_LNG[1]):
+        return _err("La ubicación debe estar dentro de Perú")
+    try:
+        prec = float(data.get("precision_m"))
+        prec = prec if 0 <= prec <= 100000 else None
+    except (TypeError, ValueError):
+        prec = None
+
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        if not _uuid_valido(token):
+            return _err("Enlace inválido", 404)
+        cur.execute("SELECT id, intentos, expira_en < NOW() FROM mad_ubicaciones_pedidas WHERE token = %s FOR UPDATE", (token,))
+        row = cur.fetchone()
+        if not row:
+            return _err("Enlace inválido", 404)
+        if row[2]:
+            return _err("Este enlace venció. Pide a Sanitas que te envíe uno nuevo.", 410)
+        if row[1] >= MAD_UBICACION_MAX_ENVIOS:
+            return _err("Ya enviaste tu ubicación varias veces. Llama al 219-1919 si necesitas corregirla.", 429)
+        cur.execute("""UPDATE mad_ubicaciones_pedidas
+                       SET lat = %s, lng = %s, precision_m = %s, respondida_en = NOW(), intentos = intentos + 1
+                       WHERE id = %s""", (lat, lng, prec, row[0]))
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return (json.dumps({"ok": True}), 200, HEADERS)
+
+
+def handle_servir_ubicacion(request, token=None):
+    return _servir_html("ubicacion.html")
+
+
 def handle_servir_proveedor(request):
     return _servir_html("proveedor.html")
 
@@ -1564,7 +1940,7 @@ def obtener_estado_tracking(tracking_token):
                    ST_Distance(pe.ubicacion, s.origen), COALESCE(s.cambios_medico, 0),
                    s.programada_para, s.origen_referencia, s.contacto_nombre, s.contacto_telefono,
                    COALESCE(s.reprogramaciones, 0), s.creado_en,
-                   p.cmp, em.nombre, s.id
+                   p.cmp, em.nombre, s.id, (s.empresa_aceptada_en IS NOT NULL)
             FROM solicitudes s
             LEFT JOIN proveedores p ON p.id = s.proveedor_id
             LEFT JOIN mad_empresas em ON em.id = p.empresa_id
@@ -1577,7 +1953,7 @@ def obtener_estado_tracking(tracking_token):
 
         (estado, tipo, plng, plat, olng, olat, nombre, direccion, distrito, dist_m, cambios_medico,
          programada_para, referencia, contacto_nombre, contacto_telefono, n_repro, creado_en,
-         prov_cmp, prov_empresa, sol_id) = row
+         prov_cmp, prov_empresa, sol_id, empresa_confirmo) = row
 
         eta_min = None
         if estado in ('asignado', 'en_camino') and dist_m is not None:
@@ -1598,6 +1974,7 @@ def obtener_estado_tracking(tracking_token):
         'proveedor_cmp': prov_cmp if hay_doctor else None,
         'proveedor_empresa': prov_empresa if hay_doctor else None,
         'novedades': novedades,
+        'empresa_confirmo': bool(empresa_confirmo) and estado == 'buscando_proveedor',
         'eta_min': eta_min,
         'distancia_km': round(float(dist_m) / 1000, 1) if (dist_m is not None and hay_doctor) else None,
         'cambios_medico': cambios_medico,
@@ -1650,6 +2027,8 @@ def handle_cancelar_solicitud_cliente(request, tracking_token):
             WHERE id = %s
         """, (motivo, comentario, solicitud_id))
 
+        cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'cancelada', respondido_en = NOW()
+                       WHERE solicitud_id = %s AND estado IN ('pendiente', 'aceptada')""", (solicitud_id,))
         # Ofertas pendientes de esta solicitud → canceladas
         cur.execute("""
             UPDATE solicitudes_ofertas SET estado = 'cancelada', respondido_en = NOW()
@@ -1850,6 +2229,9 @@ def handle_reprogramar_solicitud_cliente(request, tracking_token):
         liberar = set()
         doctor_liberado = None
         if material:
+            cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'cancelada', respondido_en = NOW()
+                           WHERE solicitud_id = %s AND estado IN ('pendiente', 'aceptada')""", (sid,))
+            cur.execute("UPDATE solicitudes SET empresa_aceptada_en = NULL WHERE id = %s AND estado = 'buscando_proveedor'", (sid,))
             cur.execute("""
                 UPDATE solicitudes_ofertas SET estado = 'cancelada', respondido_en = NOW()
                 WHERE solicitud_id = %s AND estado = 'pendiente' RETURNING proveedor_id
@@ -1943,7 +2325,12 @@ def handle_actualizar_ubicacion_proveedor(request, proveedor_id):
 
     conn = get_connection()
     cur = conn.cursor()
+    recien_conectado = False
     try:
+        cur.execute("""SELECT estado, ubicacion IS NULL,
+                              COALESCE(EXTRACT(EPOCH FROM (NOW() - actualizado_en)), 99999)
+                       FROM proveedores_estado WHERE proveedor_id = %s""", (proveedor_id,))
+        previo = cur.fetchone()
         cur.execute("""
             UPDATE proveedores_estado
             SET ubicacion = ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
@@ -1951,8 +2338,17 @@ def handle_actualizar_ubicacion_proveedor(request, proveedor_id):
             WHERE proveedor_id = %s
         """, (lng, lat, datetime.now(LIMA_TZ), proveedor_id))
         conn.commit()
+        # Primera señal tras estar desconectado o sin reportar (>90 s): puede haber servicios esperando
+        recien_conectado = bool(previo and previo[0] == 'disponible' and (previo[1] or previo[2] > 90))
     finally:
         cur.close(); conn.close()
+
+    if recien_conectado:
+        try:
+            _reabrir_sin_cobertura(proveedor_id)
+            _ofrecer_en_espera_a_proveedor(proveedor_id)
+        except Exception as e:
+            logging.warning(f"[MAD] revisión de servicios en espera falló (proveedor={proveedor_id}): {e}")
 
     return (json.dumps({"status": "ok"}), 200, HEADERS)
 
@@ -2061,6 +2457,7 @@ def handle_estado_actual_proveedor(request, proveedor_id):
         "nombre": nombre,
         "disponibilidad": disponibilidad,
         "app_version": MAD_APP_VERSION,
+        "apk_version": MAD_APK_VERSION,
         "autodesconexion_min": MAD_AUTODESCONEXION_MIN,
         "oferta_pendiente": oferta_pendiente,
         "servicio_activo": servicio_activo,
@@ -2174,6 +2571,89 @@ def _autodesconectar_proveedores():
     return ids
 
 
+def _reabrir_sin_cobertura(proveedor_id=None):
+    """Servicios digitados por el call center que quedaron 'sin_cobertura' hace poco: si ahora hay un
+    doctor conectado (con señal fresca) a su alcance, se reabre la búsqueda y se le ofrece.
+    proveedor_id: restringe a ese doctor (cuando acaba de conectarse). Devuelve los ids reabiertos."""
+    reabiertas = []
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT s.id FROM solicitudes s
+            WHERE s.estado = 'sin_cobertura' AND s.canal = 'callcenter'
+              AND s.creado_en > NOW() - INTERVAL '{MAD_REABRIR_MIN} minutes'
+              AND EXISTS (
+                SELECT 1 FROM proveedores p
+                JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+                WHERE pe.estado = 'disponible' AND pe.ubicacion IS NOT NULL
+                  AND pe.actualizado_en > NOW() - INTERVAL '{MAD_AUTODESCONEXION_MIN} minutes'
+                  AND p.tipo_servicio IN (s.tipo_servicio, 'AMBOS')
+                  AND ST_DWithin(pe.ubicacion, s.origen, {RADIO_MAXIMO_METROS})
+                  AND (%s::int IS NULL OR p.id = %s::int)
+                  AND EXISTS (SELECT 1 FROM mad_empresas_prioridad pr
+                              WHERE pr.empresa_id = p.empresa_id AND pr.tipo_servicio = s.tipo_servicio AND pr.peso > 0)
+                  AND NOT EXISTS (SELECT 1 FROM solicitudes_ofertas_empresa oe
+                                  WHERE oe.solicitud_id = s.id AND oe.empresa_id = p.empresa_id
+                                    AND oe.estado IN ('rechazada','expirada'))
+              )
+            ORDER BY s.creado_en LIMIT 5
+        """, (proveedor_id, proveedor_id))
+        ids = [r[0] for r in cur.fetchall()]
+        for sid in ids:
+            cur.execute("""
+                UPDATE solicitudes
+                SET estado = 'buscando_proveedor', intentos_asignacion = 0,
+                    radio_busqueda_metros = 5000, ultima_busqueda_en = NULL
+                WHERE id = %s AND estado = 'sin_cobertura' RETURNING id
+            """, (sid,))
+            if cur.fetchone():
+                cur.execute("""
+                    INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+                    VALUES (%s, 'sin_cobertura', 'buscando_proveedor', 'sistema_doctor_conectado')
+                """, (sid,))
+                reabiertas.append(sid)
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    for sid in reabiertas:
+        try:
+            r = buscar_y_ofrecer_proveedor(sid, radio_metros=RADIO_MAXIMO_METROS)
+            logging.info(f"[MAD] servicio #{sid} reabierto por doctor conectado → {r.get('status')}")
+        except Exception as e:
+            logging.warning(f"[MAD] no se pudo reabrir #{sid}: {e}")
+    return reabiertas
+
+
+def _ofrecer_en_espera_a_proveedor(proveedor_id):
+    """Un doctor acaba de conectarse: si hay servicios buscando empresa (sin oferta pendiente ni empresa que
+    ya lo aceptó) y la empresa del doctor puede recibirlos, se dispara la búsqueda ya, sin esperar al minuto."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT s.id FROM solicitudes s
+            JOIN proveedores_estado pe ON pe.proveedor_id = %s
+            JOIN proveedores p ON p.id = pe.proveedor_id
+            JOIN mad_empresas_prioridad pr ON pr.empresa_id = p.empresa_id AND pr.tipo_servicio = s.tipo_servicio AND pr.peso > 0
+            WHERE s.estado = 'buscando_proveedor' AND s.programada_para IS NULL
+              AND s.empresa_aceptada_en IS NULL
+              AND pe.estado = 'disponible' AND pe.ubicacion IS NOT NULL
+              AND p.tipo_servicio IN (s.tipo_servicio, 'AMBOS')
+              AND ST_DWithin(pe.ubicacion, s.origen, {RADIO_MAXIMO_METROS})
+              AND NOT EXISTS (SELECT 1 FROM solicitudes_ofertas_empresa oe WHERE oe.solicitud_id = s.id AND oe.estado = 'pendiente')
+              AND NOT EXISTS (SELECT 1 FROM solicitudes_ofertas_empresa oe
+                              WHERE oe.solicitud_id = s.id AND oe.empresa_id = p.empresa_id AND oe.estado IN ('rechazada','expirada'))
+            ORDER BY s.creado_en LIMIT 3
+        """, (proveedor_id,))
+        ids = [r[0] for r in cur.fetchall()]
+    finally:
+        cur.close(); conn.close()
+    for sid in ids:
+        r = buscar_y_ofrecer_proveedor(sid, radio_metros=RADIO_MAXIMO_METROS)
+        if r.get('status') == 'ofrecido':
+            break
+
+
 def _marcar_sin_cobertura(solicitud_id):
     conn = get_connection(); cur = conn.cursor()
     try:
@@ -2189,11 +2669,15 @@ def _marcar_sin_cobertura(solicitud_id):
             INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
             VALUES (%s, 'buscando_proveedor', 'sin_cobertura', 'sistema')
         """, (solicitud_id,))
+        cur.execute("""SELECT COUNT(*) FROM solicitudes_historial_estado
+                       WHERE solicitud_id = %s AND estado_nuevo = 'sin_cobertura'""", (solicitud_id,))
+        primera_vez = cur.fetchone()[0] <= 1
         conn.commit()
     finally:
         cur.close(); conn.close()
 
-    notificar_cliente_sin_cobertura(solicitud_id)
+    if primera_vez:       # si el servicio se reabrió y volvió a fallar, no se vuelve a molestar al cliente
+        notificar_cliente_sin_cobertura(solicitud_id)
     return True
 
 
@@ -2208,6 +2692,9 @@ def _reintentar_solicitudes_sin_oferta():
         cur.execute("""
             SELECT s.id FROM solicitudes s
             WHERE s.estado = 'buscando_proveedor'
+              AND s.empresa_aceptada_en IS NULL
+              AND NOT EXISTS (SELECT 1 FROM solicitudes_ofertas_empresa oe
+                              WHERE oe.solicitud_id = s.id AND oe.estado = 'pendiente')
               AND NOT EXISTS (SELECT 1 FROM solicitudes_ofertas o
                               WHERE o.solicitud_id = s.id AND o.estado = 'pendiente')
               AND COALESCE(s.ultima_busqueda_en, '-infinity'::timestamp) < %s
@@ -2329,6 +2816,9 @@ def handle_revisar_timeouts_ofertas(request):
 
     limite = datetime.now(LIMA_TZ) - timedelta(seconds=TIMEOUT_OFERTA_SEGUNDOS)
 
+    # 0b) Ofertas a empresas vencidas y servicios aceptados que la empresa no asignó a tiempo
+    empresas_vencidas = _vencer_ofertas_empresa()
+
     # 1) Ofertas pendientes que ya vencieron, con su solicitud aún activa
     conn = get_connection(); cur = conn.cursor()
     try:
@@ -2408,7 +2898,12 @@ def handle_revisar_timeouts_ofertas(request):
     huerfanas_reintentadas, huerfanas_sin_cobertura = _reintentar_solicitudes_sin_oferta()
     sin_cobertura.extend(huerfanas_sin_cobertura)
 
+    # 5) Servicios del call center sin cobertura que ya tienen un doctor conectado a su alcance
+    reabiertas = _reabrir_sin_cobertura()
+
     return (json.dumps({
+        "reabiertas": reabiertas,
+        "ofertas_empresa_vencidas": len(empresas_vencidas),
         "autodesconectados": len(desconectados),
         "ofertas_vencidas": vencidas,
         "reasignadas": len(reasignadas),
@@ -2446,6 +2941,7 @@ def _mad_desactivar_usuario(cur, usuario_id, proveedor_id):
 
     cur.execute("UPDATE mad_usuarios SET activo = FALSE WHERE id = %s", (usuario_id,))
     cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE usuario_id = %s", (usuario_id,))
+    cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (usuario_id,))
     if proveedor_id:
         cur.execute("DELETE FROM proveedores_push WHERE proveedor_id = %s", (proveedor_id,))
         cur.execute("""
@@ -2597,6 +3093,7 @@ def handle_mad_admin_reset(request, usuario_id):
         if not r:
             return _mad_json({"error": "Usuario no encontrado"}, 404)
         cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE usuario_id = %s", (int(usuario_id),))
+        cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (int(usuario_id),))
         _mad_audit(cur, s["id"], "usuario_reset", f"usuario:{int(usuario_id)}")
         conn.commit()
     finally:
@@ -2974,6 +3471,119 @@ def handle_mad_admin_liberaciones_proveedor(request, proveedor_id):
     })
 
 
+MAD_MAX_SMS_TRACKING = 5     # reenvíos por servicio
+
+
+@con_log_errores
+def handle_mad_admin_ofrecer_a_proveedor(request, solicitud_id):
+    """Coordinador: ofrece un servicio a la EMPRESA de un doctor en línea (sin importar peso ni distancia).
+    La empresa acepta y asigna. Cancela cualquier oferta/aceptación previa de la solicitud."""
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    if not str(solicitud_id).isdigit() or not str(data.get("proveedor_id") or "").isdigit():
+        return _mad_json({"error": "Datos inválidos"}, 400)
+    sid, pid = int(solicitud_id), int(data["proveedor_id"])
+
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT estado, tipo_servicio, origen_distrito, programada_para,
+                              ST_Distance(origen, (SELECT ubicacion FROM proveedores_estado WHERE proveedor_id = %s))
+                       FROM solicitudes WHERE id = %s FOR UPDATE""", (pid, sid))
+        row = cur.fetchone()
+        if not row:
+            return _mad_json({"error": "Solicitud no encontrada"}, 404)
+        estado, tipo, distrito, programada_para, dist_m = row
+        if estado not in ("buscando_proveedor", "sin_cobertura"):
+            return _mad_json({"error": "Solo se puede ofrecer un servicio que esté buscando doctor o sin cobertura"}, 409)
+
+        cur.execute("""SELECT p.empresa_id, p.tipo_servicio, pe.estado, e.celular_alertas
+                       FROM proveedores p JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+                       LEFT JOIN mad_empresas e ON e.id = p.empresa_id AND e.activo
+                       WHERE p.id = %s""", (pid,))
+        d = cur.fetchone()
+        if not d:
+            conn.rollback()
+            return _mad_json({"error": "Doctor no encontrado"}, 404)
+        empresa_id, tipo_doc, estado_doc, celular_alertas = d
+        if not empresa_id:
+            conn.rollback()
+            return _mad_json({"error": "El doctor no tiene empresa asignada"}, 409)
+        if estado_doc != "disponible":
+            conn.rollback()
+            return _mad_json({"error": "El doctor no está disponible en línea (puede estar ocupado o desconectado)"}, 409)
+        if tipo_doc not in (tipo, "AMBOS"):
+            conn.rollback()
+            return _mad_json({"error": "El doctor no atiende este tipo de servicio"}, 409)
+
+        cur.execute("""UPDATE solicitudes_ofertas_empresa SET estado = 'cancelada', respondido_en = NOW()
+                       WHERE solicitud_id = %s AND estado IN ('pendiente', 'aceptada')""", (sid,))
+        if estado == "sin_cobertura":
+            cur.execute("""UPDATE solicitudes SET estado = 'buscando_proveedor', intentos_asignacion = 0,
+                               radio_busqueda_metros = 5000 WHERE id = %s""", (sid,))
+            cur.execute("""INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
+                           VALUES (%s, 'sin_cobertura', 'buscando_proveedor', 'coordinador')""", (sid,))
+        cur.execute("""UPDATE solicitudes SET empresa_aceptada_en = NULL, ultima_busqueda_en = %s WHERE id = %s""",
+                    (datetime.now(LIMA_TZ).replace(tzinfo=None), sid))
+        cur.execute("""INSERT INTO solicitudes_ofertas_empresa (solicitud_id, empresa_id, estado)
+                       VALUES (%s, %s, 'pendiente')""", (sid, empresa_id))
+        _mad_audit(cur, s["id"], "oferta_manual", f"solicitud:{sid}",
+                   {"proveedor_id": pid, "empresa_id": empresa_id,
+                    "distancia_km": round(dist_m / 1000, 1) if dist_m is not None else None})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    avisar_empresa_oferta(celular_alertas, tipo, distrito, programada_para)
+    return _mad_json({"ok": True, "distancia_km": round(dist_m / 1000, 1) if dist_m is not None else None})
+
+
+@con_log_errores
+def handle_mad_admin_enviar_tracking(request, solicitud_id):
+    """Coordinador: envía (o reenvía) por SMS el enlace de seguimiento al cliente."""
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    if not str(solicitud_id).isdigit():
+        return _mad_json({"error": "Solicitud inválida"}, 400)
+    sid = int(solicitud_id)
+    data = request.get_json(force=True, silent=True) or {}
+
+    tel_alt = re.sub(r"\D", "", str(data.get("telefono") or ""))
+    if tel_alt:
+        if len(tel_alt) == 9 and tel_alt.startswith("9"):
+            tel_alt = "51" + tel_alt
+        if not re.fullmatch(r"51\d{9}", tel_alt):
+            return _mad_json({"error": "El celular no es válido (9 dígitos, empieza con 9)"}, 400)
+
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT estado, tracking_token, cliente_telefono, tipo_servicio FROM solicitudes WHERE id = %s", (sid,))
+        row = cur.fetchone()
+        if not row:
+            return _mad_json({"error": "Solicitud no encontrada"}, 404)
+        estado, token, tel_cliente, tipo = row
+        if estado not in ESTADOS_ABIERTOS:
+            return _mad_json({"error": "El servicio ya terminó; no tiene sentido enviar el seguimiento"}, 409)
+        cur.execute("SELECT COUNT(*) FROM mad_auditoria WHERE accion = 'tracking_sms' AND objetivo = %s", (f"solicitud:{sid}",))
+        if cur.fetchone()[0] >= MAD_MAX_SMS_TRACKING:
+            return _mad_json({"error": f"Ya se envió el seguimiento {MAD_MAX_SMS_TRACKING} veces para este servicio"}, 429)
+        numero = _normalizar_celular_pe(tel_alt or tel_cliente)
+        if not numero:
+            return _mad_json({"error": "El servicio no tiene un celular válido. Escribe uno."}, 400)
+        _mad_audit(cur, s["id"], "tracking_sms", f"solicitud:{sid}", {"destino_final": numero[-3:], "alterno": bool(tel_alt)})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    link = f"{_base_url()}/track/{token}"
+    nombre = "Medico a domicilio" if tipo == "MAD" else "Ambulancia"
+    enviar_danaconnect(numero, f"Sanitas: Sigue tu servicio de {nombre} y la ubicacion del profesional aqui: {link}")
+    sms_aviso(numero, "mad tracking monitor")
+    return _mad_json({"ok": True, "enviado_a": "***" + numero[-3:]})
+
+
 @con_log_errores
 def handle_mad_admin_activar_programada(request, solicitud_id):
     """Coordinador: empezar a buscar doctor ya, sin esperar a la hora de activación."""
@@ -2990,11 +3600,11 @@ def handle_mad_admin_activar_programada(request, solicitud_id):
             UPDATE solicitudes
             SET estado = 'buscando_proveedor', intentos_asignacion = 0,
                 radio_busqueda_metros = 5000, ultima_busqueda_en = NULL
-            WHERE id = %s AND estado = 'programada'
+            WHERE id = %s AND estado IN ('programada', 'sin_cobertura')
             RETURNING id
         """, (sid,))
         if not cur.fetchone():
-            return _mad_json({"error": "La solicitud no está en estado programada"}, 409)
+            return _mad_json({"error": "La solicitud no está programada ni sin cobertura"}, 409)
         cur.execute("""
             INSERT INTO solicitudes_historial_estado (solicitud_id, estado_anterior, estado_nuevo, cambiado_por)
             VALUES (%s, 'programada', 'buscando_proveedor', 'coordinador')
@@ -3024,9 +3634,11 @@ def handle_mad_monitor_datos(request):
                    ST_Y(s.origen::geometry) AS lat, ST_X(s.origen::geometry) AS lng,
                    s.creado_en, s.asignado_en, s.intentos_asignacion, s.radio_busqueda_metros,
                    p.nombre AS proveedor_asignado, s.tracking_token,
-                   (SELECT p2.nombre FROM solicitudes_ofertas o
-                      JOIN proveedores p2 ON p2.id = o.proveedor_id
-                    WHERE o.solicitud_id = s.id AND o.estado = 'pendiente'
+                   (SELECT CASE WHEN o.estado = 'aceptada' THEN e2.nombre || ' (aceptó, falta asignar doctor)'
+                                ELSE e2.nombre || ' (esperando respuesta)' END
+                      FROM solicitudes_ofertas_empresa o
+                      JOIN mad_empresas e2 ON e2.id = o.empresa_id
+                    WHERE o.solicitud_id = s.id AND o.estado IN ('pendiente', 'aceptada') AND s.estado = 'buscando_proveedor'
                     ORDER BY o.id DESC LIMIT 1) AS ofrecido_a,
                    s.proveedor_id,
                    s.programada_para, s.contacto_nombre, s.contacto_telefono,
@@ -3136,6 +3748,154 @@ def _mad_rango(request):
     if (hasta - desde).days > 366:
         desde = hasta - timedelta(days=366)
     return hoy, desde, hasta
+
+
+# ── Prioridades de empresas (monitor) ──
+@con_log_errores
+def handle_mad_admin_prioridades_listar(request):
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT e.id, e.nombre, e.activo, e.celular_alertas,
+                   COALESCE(m.peso, 0), COALESCE(a.peso, 0),
+                   (SELECT COUNT(*) FROM proveedores p WHERE p.empresa_id = e.id)
+            FROM mad_empresas e
+            LEFT JOIN mad_empresas_prioridad m ON m.empresa_id = e.id AND m.tipo_servicio = 'MAD'
+            LEFT JOIN mad_empresas_prioridad a ON a.empresa_id = e.id AND a.tipo_servicio = 'AMBULANCIA'
+            ORDER BY e.nombre
+        """)
+        filas = [{"empresa_id": r[0], "nombre": r[1], "activo": r[2], "celular_alertas": r[3],
+                  "peso_mad": r[4], "peso_ambulancia": r[5], "doctores": r[6]} for r in cur.fetchall()]
+    finally:
+        cur.close(); conn.close()
+    return _mad_json({"empresas": filas})
+
+
+@con_log_errores
+def handle_mad_admin_prioridades_guardar(request):
+    """Body: {"empresas": [{"empresa_id":1,"peso_mad":10,"peso_ambulancia":0,"celular_alertas":"9XXXXXXXX"}, ...]}"""
+    s, err = _mad_exigir(request, "coordinador")
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    items = data.get("empresas")
+    if not isinstance(items, list) or not items:
+        return _err("Lista de empresas vacía")
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        for it in items:
+            try:
+                eid = int(it.get("empresa_id"))
+                pm = max(0, min(int(it.get("peso_mad") or 0), 1000))
+                pa = max(0, min(int(it.get("peso_ambulancia") or 0), 1000))
+            except (TypeError, ValueError):
+                conn.rollback()
+                return _err("Datos inválidos")
+            cel_raw = str(it.get("celular_alertas") or "").strip()
+            cel = _normalizar_celular_pe(cel_raw) if cel_raw else None
+            if cel_raw and not cel:
+                conn.rollback()
+                return _err(f"Celular de alertas inválido: {cel_raw}")
+            cur.execute("UPDATE mad_empresas SET celular_alertas = %s WHERE id = %s", (cel, eid))
+            for tipo, peso in (("MAD", pm), ("AMBULANCIA", pa)):
+                cur.execute("""
+                    INSERT INTO mad_empresas_prioridad (empresa_id, tipo_servicio, peso) VALUES (%s, %s, %s)
+                    ON CONFLICT (empresa_id, tipo_servicio) DO UPDATE SET peso = EXCLUDED.peso, actualizado_en = NOW()
+                """, (eid, tipo, peso))
+        _mad_audit(cur, s["id"], "prioridades_guardar", "empresas", {"n": len(items)})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return _mad_json({"ok": True})
+
+
+# ── Ofertas en el portal de la empresa ──
+@con_log_errores
+def handle_mad_empresa_ofertas(request):
+    s, err = _mad_empresa_ctx(request)
+    if err:
+        return err
+    eid = s["empresa_id"]
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        # Pendientes de aceptar: solo zona/tipo/distancia (sin datos del paciente)
+        cur.execute("""
+            SELECT o.id, s.id, s.tipo_servicio, s.origen_distrito, s.programada_para,
+                   EXTRACT(EPOCH FROM (o.ofrecido_en + make_interval(secs => %s) - NOW()))::int,
+                   (SELECT MIN(ST_Distance(pe.ubicacion, s.origen::geography)) FROM proveedores p
+                      JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+                     WHERE p.empresa_id = %s AND pe.estado = 'disponible' AND pe.ubicacion IS NOT NULL)
+            FROM solicitudes_ofertas_empresa o JOIN solicitudes s ON s.id = o.solicitud_id
+            WHERE o.empresa_id = %s AND o.estado = 'pendiente' AND s.estado = 'buscando_proveedor'
+            ORDER BY o.ofrecido_en
+        """, (MAD_OFERTA_EMPRESA_SEG, eid, eid))
+        pendientes = [{"oferta_id": r[0], "solicitud_id": r[1], "tipo": r[2], "distrito": r[3],
+                       "programada_para": r[4].isoformat() if r[4] else None,
+                       "segundos_restantes": max(0, r[5] or 0),
+                       "doctor_mas_cercano_km": round(r[6] / 1000, 1) if r[6] is not None else None}
+                      for r in cur.fetchall()]
+
+        # Aceptadas por la empresa, a la espera de asignar doctor: ya ve dirección y referencia (no datos clínicos)
+        cur.execute("""
+            SELECT s.id, s.tipo_servicio, s.origen_direccion_texto, s.origen_distrito, s.origen_referencia,
+                   s.programada_para,
+                   EXTRACT(EPOCH FROM (s.empresa_aceptada_en + make_interval(mins => %s) - NOW()))::int
+            FROM solicitudes s
+            WHERE s.empresa_id = %s AND s.estado = 'buscando_proveedor' AND s.empresa_aceptada_en IS NOT NULL
+            ORDER BY s.empresa_aceptada_en
+        """, (MAD_ASIGNAR_MIN, eid))
+        por_asignar = []
+        for r in cur.fetchall():
+            cur.execute("""
+                SELECT p.id, p.nombre, pe.estado,
+                       CASE WHEN pe.ubicacion IS NULL THEN NULL
+                            ELSE ST_Distance(pe.ubicacion, (SELECT origen::geography FROM solicitudes WHERE id = %s)) END
+                FROM proveedores p LEFT JOIN proveedores_estado pe ON pe.proveedor_id = p.id
+                WHERE p.empresa_id = %s AND p.tipo_servicio IN (%s, 'AMBOS')
+                  AND pe.estado = 'disponible'
+                ORDER BY 4 NULLS LAST
+            """, (r[0], eid, r[1]))
+            docs = [{"id": d[0], "nombre": d[1], "km": round(d[3] / 1000, 1) if d[3] is not None else None}
+                    for d in cur.fetchall()]
+            por_asignar.append({"solicitud_id": r[0], "tipo": r[1], "direccion": r[2], "distrito": r[3],
+                                "referencia": r[4], "programada_para": r[5].isoformat() if r[5] else None,
+                                "segundos_restantes": max(0, r[6] or 0), "doctores": docs})
+    finally:
+        cur.close(); conn.close()
+    return _mad_json({"pendientes": pendientes, "por_asignar": por_asignar})
+
+
+@con_log_errores
+def handle_mad_empresa_oferta_accion(request, oferta_id, accion):
+    s, err = _mad_empresa_ctx(request)
+    if err:
+        return err
+    if accion == "aceptar":
+        r = aceptar_oferta_empresa(oferta_id, s["empresa_id"], s["id"])
+    else:
+        r = rechazar_oferta_empresa(oferta_id, s["empresa_id"], s["id"])
+    if r.get("status") == "error":
+        return _err(r.get("mensaje") or "No se pudo", 409)
+    return _mad_json({"ok": True, **{k: v for k, v in r.items() if k != "siguiente"}})
+
+
+@con_log_errores
+def handle_mad_empresa_asignar(request, solicitud_id):
+    s, err = _mad_empresa_ctx(request)
+    if err:
+        return err
+    try:
+        pid = int((request.get_json(force=True, silent=True) or {}).get("proveedor_id"))
+    except (TypeError, ValueError):
+        return _err("Elige un doctor")
+    r = asignar_doctor_empresa(solicitud_id, pid, s["empresa_id"], s["id"])
+    if r.get("status") != "ok":
+        return _err(r.get("mensaje") or "No se pudo asignar", 409)
+    return _mad_json({"ok": True})
+
 
 
 def _mad_conteos(cur, hoy, desde, hasta, proveedor_ids=None, empresa_id=None):
@@ -3590,6 +4350,7 @@ def handle_mad_empresa_doctor_reset(request, proveedor_id):
         if not u:
             return _mad_json({"error": "El doctor no tiene usuario de acceso"}, 404)
         cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE usuario_id = %s", (u[0],))
+        cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (u[0],))
         _mad_audit(cur, s["id"], "usuario_reset", f"usuario:{u[0]}")
         conn.commit()
     finally:
@@ -3722,6 +4483,7 @@ def handle_mad_empresa_usuario_estado(request, usuario_id):
         else:
             cur.execute("UPDATE mad_usuarios SET activo = FALSE WHERE id = %s", (uid,))
             cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE usuario_id = %s", (uid,))
+            cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (uid,))
         _mad_audit(cur, s["id"], "usuario_activar" if activo else "usuario_desactivar", f"usuario:{uid}")
         conn.commit()
     finally:
@@ -3756,6 +4518,7 @@ def handle_mad_empresa_usuario_reset(request, usuario_id):
         if not r:
             return _mad_json({"error": "Usuario no encontrado"}, 404)
         cur.execute("UPDATE mad_sesiones SET revocado = TRUE WHERE usuario_id = %s", (uid,))
+        cur.execute("UPDATE mad_dispositivos SET revocado = TRUE WHERE usuario_id = %s", (uid,))
         _mad_audit(cur, s["id"], "usuario_reset", f"usuario:{uid}")
         conn.commit()
     finally:
@@ -3815,8 +4578,18 @@ def mad_router(request, path):
         return handle_mad_admin_listar(request)
     if path == "/mad/admin/proveedores" and m == "POST":
         return handle_mad_admin_crear_proveedor(request)
+    if path == "/mad/admin/ubicaciones/pedir" and m == "POST":
+        return handle_mad_admin_pedir_ubicacion(request)
+    if m == "GET":
+        x = _entre(path, "/mad/admin/ubicaciones/", "")
+        if x and x.isdigit():
+            return handle_mad_admin_estado_ubicacion(request, x)
     if path == "/mad/admin/solicitudes" and m == "POST":
         return handle_mad_admin_crear_solicitud(request)
+    if path == "/mad/admin/prioridades" and m == "GET":
+        return handle_mad_admin_prioridades_listar(request)
+    if path == "/mad/admin/prioridades" and m == "POST":
+        return handle_mad_admin_prioridades_guardar(request)
     if path == "/mad/admin/empresas" and m == "GET":
         return handle_mad_admin_empresas_listar(request)
     if path == "/mad/admin/empresas" and m == "POST":
@@ -3832,6 +4605,10 @@ def mad_router(request, path):
         if x: return handle_mad_admin_doctor_editar(request, x)
         x = _entre(path, "/mad/admin/solicitudes/", "/liberar")
         if x: return handle_mad_admin_liberar_servicio(request, x)
+        x = _entre(path, "/mad/admin/solicitudes/", "/ofrecer")
+        if x: return handle_mad_admin_ofrecer_a_proveedor(request, x)
+        x = _entre(path, "/mad/admin/solicitudes/", "/enviar-tracking")
+        if x: return handle_mad_admin_enviar_tracking(request, x)
         x = _entre(path, "/mad/admin/solicitudes/", "/activar")
         if x: return handle_mad_admin_activar_programada(request, x)
     if m == "GET":
@@ -3841,6 +4618,8 @@ def mad_router(request, path):
     # ── Portal de la empresa ──
     if path == "/mad/empresa" and m == "GET":
         return handle_mad_empresa_pagina(request)
+    if path == "/mad/empresa/ofertas" and m == "GET":
+        return handle_mad_empresa_ofertas(request)
     if path == "/mad/empresa/resumen" and m == "GET":
         return handle_mad_empresa_resumen(request)
     if path == "/mad/empresa/exportar" and m == "GET":
@@ -3854,6 +4633,12 @@ def mad_router(request, path):
     if path == "/mad/empresa/usuarios" and m == "POST":
         return handle_mad_empresa_crear_usuario(request)
     if m == "POST":
+        x = _entre(path, "/mad/empresa/ofertas/", "/aceptar")
+        if x and x.isdigit(): return handle_mad_empresa_oferta_accion(request, int(x), "aceptar")
+        x = _entre(path, "/mad/empresa/ofertas/", "/rechazar")
+        if x and x.isdigit(): return handle_mad_empresa_oferta_accion(request, int(x), "rechazar")
+        x = _entre(path, "/mad/empresa/solicitudes/", "/asignar")
+        if x and x.isdigit(): return handle_mad_empresa_asignar(request, int(x))
         x = _entre(path, "/mad/empresa/doctores/", "/estado")
         if x: return handle_mad_empresa_doctor_estado(request, x)
         x = _entre(path, "/mad/empresa/doctores/", "/reset")
@@ -3950,6 +4735,16 @@ def mad_router(request, path):
             return handle_buscar_proveedor(request, x)
 
     # ── Seguimiento del cliente (el token del enlace funciona como llave) ──
+    if path.startswith("/track/u/"):
+        x = _entre(path, "/track/u/", "/enviar")
+        if x and m == "POST":
+            return handle_ubicacion_enviar(request, x)
+        x = _entre(path, "/track/u/", "/info")
+        if x and m == "GET":
+            return handle_ubicacion_info(x)
+        x = path.split("/track/u/")[1]
+        if x and "/" not in x and m == "GET":
+            return handle_servir_ubicacion(request, x)
     if path.startswith("/track/"):
         if m == "POST":
             x = _entre(path, "/track/", "/cancelar")

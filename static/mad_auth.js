@@ -5,6 +5,13 @@
     set(t) { try { localStorage.setItem(KEY, t); } catch (e) {} },
     del() { try { localStorage.removeItem(KEY); } catch (e) {} },
   };
+  // Celular de confianza (solo dentro de la app Android del doctor)
+  const DEV = 'mad_dev';
+  const dispositivo = {
+    get() { try { return window.MadNativo ? localStorage.getItem(DEV) : null; } catch (e) { return null; } },
+    set(t) { try { localStorage.setItem(DEV, t); } catch (e) {} },
+    del() { try { localStorage.removeItem(DEV); } catch (e) {} },
+  };
 
   async function llamar(path, body, tokenParcial) {
     const headers = { 'Content-Type': 'application/json' };
@@ -47,6 +54,8 @@
   #madAuth button{width:100%;padding:13px;background:#0057b8;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer}
   #madAuth button:disabled{opacity:.6}
   #madAuth .error{color:#c0392b;font-size:12.5px;min-height:18px;margin-top:10px}
+  #madAuth label.rec{display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;text-align:left;margin:0 0 12px;cursor:pointer}
+  #madAuth label.rec input{width:auto;margin:0}
   #madAuth .qr{display:flex;justify-content:center;margin:6px 0 10px}
   #madAuth .secreto{font-family:monospace;font-size:12px;background:#f4f6f9;padding:8px;border-radius:6px;word-break:break-all;margin-bottom:12px}
   #madAuth .pasos{font-size:12.5px;color:#6b7a82;text-align:left;margin:0 0 12px;padding-left:18px}`;
@@ -102,8 +111,19 @@
           <button type="submit">Ingresar</button></form><div class="error"></div>`);
         if (mensaje) ui.q('.error').textContent = mensaje;
         ui.q('form').onsubmit = (e) => { e.preventDefault(); enviar(ui.q('button'), async (err) => {
-          const r = await llamar('/mad/auth/login', { usuario: ui.q('#u').value, password: ui.q('#p').value });
+          const r = await llamar('/mad/auth/login', { usuario: ui.q('#u').value, password: ui.q('#p').value,
+                                                      token_dispositivo: dispositivo.get() || undefined });
           if (!r.ok) { err.textContent = r.data.error || 'No se pudo ingresar'; return; }
+          if (r.data.dispositivo_invalido) dispositivo.del();
+          if (r.data.token && r.data.usuario) {            // celular de confianza: entra sin código
+            if (r.data.usuario.rol !== rol) {
+              await llamar('/mad/auth/logout', {}, r.data.token);
+              pantallaLogin('Este usuario no tiene acceso a esta pantalla');
+              return;
+            }
+            almacen.set(r.data.token); ui.quitar(); resolve(r.data.usuario);
+            return;
+          }
           parcial = r.data.token_parcial;
           siguiente(r.data.siguiente);
         }); };
@@ -135,7 +155,7 @@
           <div class="qr" id="qr"></div>
           <div class="secreto">¿No puedes escanear? Ingresa esta clave: <span id="sec"></span></div>
           <form><input id="c" class="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
-          <button type="submit">Activar y entrar</button></form><div class="error"></div>`);
+          ${window.MadNativo ? '<label class="rec"><input type="checkbox" id="rec" checked> Recordar este celular por 30 días</label>' : ''}<button type="submit">Activar y entrar</button></form><div class="error"></div>`);
         ui.q('#sec').textContent = r.data.secreto;
         if (window.QRCode) new QRCode(ui.q('#qr'), { text: r.data.otpauth_uri, width: 180, height: 180 });
         bindCodigo();
@@ -144,14 +164,14 @@
       function pantallaCodigo() {
         ui.render(`<p>Ingresa el código de 6 dígitos de <b>Google Authenticator</b></p>
           <form><input id="c" class="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
-          <button type="submit">Verificar</button></form><div class="error"></div>`);
+          ${window.MadNativo ? '<label class="rec"><input type="checkbox" id="rec" checked> Recordar este celular por 30 días</label>' : ''}<button type="submit">Verificar</button></form><div class="error"></div>`);
         ui.q('#c').focus();
         bindCodigo();
       }
 
       function bindCodigo() {
         ui.q('form').onsubmit = (e) => { e.preventDefault(); enviar(ui.q('button'), async (err) => {
-          const r = await llamar('/mad/auth/totp/verificar', { codigo: ui.q('#c').value }, parcial);
+          const r = await llamar('/mad/auth/totp/verificar', { codigo: ui.q('#c').value, recordar: !!(ui.q('#rec') && ui.q('#rec').checked) }, parcial);
           if (expirada(r)) return;
           if (!r.ok) { err.textContent = r.data.error || 'Código incorrecto'; ui.q('#c').value = ''; return; }
           if (r.data.usuario.rol !== rol) {
@@ -159,6 +179,7 @@
             pantallaLogin('Este usuario no tiene acceso a esta pantalla');
             return;
           }
+          if (r.data.token_dispositivo) dispositivo.set(r.data.token_dispositivo);
           almacen.set(r.data.token);
           ui.quitar();
           resolve(r.data.usuario);
@@ -171,6 +192,7 @@
 
   async function cerrarSesion() {
     try { await llamar('/mad/auth/logout', {}); } catch (e) {}
+    try { if (window.MadNativo) window.MadNativo.detener(); } catch (e) {}
     almacen.del();
     location.reload();
   }

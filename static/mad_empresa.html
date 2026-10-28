@@ -68,6 +68,10 @@
   </div>
 </header>
 <main>
+  <div class="card" id="panelOfertas" style="display:none;border:2px solid #E8A33D">
+    <h3 style="margin:0 0 8px">🔔 Solicitudes para tu empresa</h3>
+    <div id="listaOfertas"></div>
+  </div>
   <div class="card filtros">
     <div><label>Desde</label><input type="date" id="fDesde"></div>
     <div><label>Hasta</label><input type="date" id="fHasta"></div>
@@ -435,7 +439,68 @@ $('formUsuario').onsubmit = async (e) => {
 $('btnVer').onclick = cargar;
 $('btnRefrescar').onclick = () => { cargar(); cargarMapa(); cargarUsuarios(); };
 document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => fijarRango(b.dataset.r));
-document.addEventListener('visibilitychange', () => { if (!document.hidden){ cargar(); cargarMapa(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden){ cargar(); cargarMapa(); cargarOfertas(); } });
+
+/* ───────── Ofertas: aceptar y asignar doctor ───────── */
+let ofertasPrevias = new Set();
+let ofertasBloqueadas = false;     // mientras se elige doctor no se redibuja el panel
+function pitar(){
+  try {
+    const c = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.25, 0.5].forEach(t => { const o = c.createOscillator(), g = c.createGain();
+      o.connect(g); g.connect(c.destination); o.frequency.value = 880; g.gain.value = 0.2;
+      o.start(c.currentTime + t); o.stop(c.currentTime + t + 0.15); });
+  } catch (e) {}
+}
+const mmss = n => `${Math.floor(n / 60)}:${p2(n % 60)}`;
+async function cargarOfertas(){
+  if (ofertasBloqueadas) return;
+  let d;
+  try {
+    const r = await MadAuth.fetch('/mad/empresa/ofertas', { cache:'no-store' });
+    if (!r.ok) return;
+    d = await r.json();
+  } catch (e) { return; }
+  const nom = t => t === 'AMBULANCIA' ? 'Ambulancia' : 'Médico a domicilio';
+  const cuando = x => x.programada_para ? ` · 📅 ${new Date(x.programada_para).toLocaleString('es-PE', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}` : '';
+  const ids = new Set(d.pendientes.map(x => 'o' + x.oferta_id).concat(d.por_asignar.map(x => 's' + x.solicitud_id)));
+  if ([...ids].some(i => !ofertasPrevias.has(i))) { pitar(); try { if (navigator.vibrate) navigator.vibrate([300,150,300]); } catch (e) {} }
+  ofertasPrevias = ids;
+  $('panelOfertas').style.display = ids.size ? 'block' : 'none';
+  const a = d.pendientes.map(x => `
+    <div style="border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:8px">
+      <b>${nom(x.tipo)}</b> · ${esc(x.distrito || 'Zona no especificada')}${cuando(x)}
+      <div class="muted">${x.doctor_mas_cercano_km != null ? `Tu doctor disponible más cercano está a ${x.doctor_mas_cercano_km} km · ` : ''}Responde en ${mmss(x.segundos_restantes)}</div>
+      <div style="margin-top:6px"><button class="btn" data-acepta="${x.oferta_id}">✅ Aceptar</button>
+      <button class="btn sec" data-rechaza="${x.oferta_id}">Rechazar</button></div>
+    </div>`).join('');
+  const b = d.por_asignar.map(x => `
+    <div style="border:2px solid #2E9E5B;border-radius:8px;padding:10px;margin-bottom:8px">
+      <b>${nom(x.tipo)}</b> · ${esc(x.direccion || '')} ${esc(x.distrito || '')}${x.referencia ? ' · Ref: ' + esc(x.referencia) : ''}${cuando(x)}
+      <div class="muted"><b>Asigna un doctor</b> — te quedan ${mmss(x.segundos_restantes)}; si no, el servicio pasa a otra empresa.</div>
+      <div style="margin-top:6px">${x.doctores.length ? x.doctores.map(dc =>
+        `<button class="btn" style="margin:2px" data-asigna="${x.solicitud_id}" data-doc="${dc.id}">👨‍⚕️ ${esc(dc.nombre)}${dc.km != null ? ' · ' + dc.km + ' km' : ''}</button>`).join('')
+        : '<b style="color:#c0392b">Ninguno de tus doctores está disponible en línea ahora.</b>'}</div>
+    </div>`).join('');
+  $('listaOfertas').innerHTML = a + b;
+  document.querySelectorAll('[data-acepta],[data-rechaza]').forEach(btn => btn.onclick = async () => {
+    const acepta = btn.dataset.acepta;
+    ofertasBloqueadas = true;
+    const { ok, d } = await post(`/mad/empresa/ofertas/${acepta || btn.dataset.rechaza}/${acepta ? 'aceptar' : 'rechazar'}`);
+    ofertasBloqueadas = false;
+    if (!ok) alert(d.error || 'No se pudo');
+    cargarOfertas();
+  });
+  document.querySelectorAll('[data-asigna]').forEach(btn => btn.onclick = async () => {
+    if (!confirm(`¿Asignar este servicio a ${btn.textContent.replace('👨‍⚕️', '').trim()}?`)) return;
+    ofertasBloqueadas = true;
+    const { ok, d } = await post(`/mad/empresa/solicitudes/${btn.dataset.asigna}/asignar`, { proveedor_id: Number(btn.dataset.doc) });
+    ofertasBloqueadas = false;
+    if (!ok) alert(d.error || 'No se pudo asignar');
+    else alert('✅ Servicio asignado. El doctor fue avisado.');
+    cargarOfertas(); cargar(); cargarMapa();
+  });
+}
 
 (async () => {
   const sesion = await MadAuth.iniciar({ rol:'empresa', titulo:'Portal de empresas' });
@@ -444,6 +509,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden){ car
   fijarRango('mes');
   cargarMapa();
   cargarUsuarios();
+  cargarOfertas();
+  setInterval(cargarOfertas, 5000);
   setInterval(cargar, 30000);
   setInterval(cargarMapa, 15000);
 })();

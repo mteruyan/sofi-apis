@@ -99,6 +99,7 @@
     <button class="btn-hdr" id="btnRefrescar">🔄 Actualizar</button>
     <button class="btn-hdr" id="btnVerTodo">🎯 Ver todo</button>
     <button id="btnNuevoServicio" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-weight:600;cursor:pointer">➕ Nuevo servicio</button>
+    <button id="btnPrioridades" style="background:#fff;color:var(--navy);border:none;border-radius:6px;padding:6px 10px;font-weight:600;cursor:pointer">⚖️ Prioridades</button>
     <button id="btnAdmin" style="background:#fff;color:var(--navy);border:none;border-radius:6px;padding:6px 10px;font-weight:600;cursor:pointer">👥 Proveedores</button>
     <button id="btnSalir" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:6px 10px;cursor:pointer">Salir</button>
   </div>
@@ -149,6 +150,41 @@
   </div>
 </div>
 
+<div id="modalDoc" style="display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2200;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:420px;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:16px">Editar doctor</b>
+      <button id="dCerrar" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <form id="formDoc" style="display:grid;gap:8px">
+      <input id="dNombre" placeholder="Nombre" maxlength="120" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="dTel" placeholder="Celular (9 dígitos)" inputmode="numeric" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <input id="dCmp" placeholder="CMP (4 a 6 dígitos)" inputmode="numeric" maxlength="6" style="padding:9px;border:1px solid var(--border);border-radius:6px">
+      <select id="dTipo" style="padding:9px;border:1px solid var(--border);border-radius:6px"><option value="MAD">Médico a domicilio</option><option value="AMBULANCIA">Ambulancia</option><option value="AMBOS">Ambos</option></select>
+      <div class="muted">Si cambias el celular, se avisa por SMS al número nuevo y al anterior.</div>
+      <div id="dError" style="color:var(--danger);font-size:12.5px;min-height:16px"></div>
+      <button type="submit" id="dGuardar" style="padding:10px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer">Guardar cambios</button>
+    </form>
+  </div>
+</div>
+
+
+<div id="modalPrior" style="display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2100;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:760px;max-height:92vh;overflow-y:auto;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b style="font-size:16px">Prioridad de empresas</b>
+      <button id="btnCerrarPrior" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div class="muted" style="margin-bottom:10px">Las solicitudes se ofrecen primero a la empresa con <b>mayor peso</b> que tenga un doctor conectado a su alcance (a igual peso, la de doctor más cercano). Peso 0 = no recibe ofertas de ese tipo. Hay una tabla para médico a domicilio y otra para ambulancia.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;border-bottom:2px solid #ddd"><th>Empresa</th><th>Doctores</th><th>Peso MAD</th><th>Peso Ambulancia</th><th>Celular de alertas</th></tr></thead>
+      <tbody id="priorBody"></tbody>
+    </table></div>
+    <div id="priorMsg" class="muted" style="margin-top:8px"></div>
+    <div style="text-align:right;margin-top:10px"><button id="btnGuardarPrior" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer">Guardar</button></div>
+  </div>
+</div>
+
 <div id="modalServicio" style="display:none;position:fixed;inset:0;background:rgba(0,54,84,.45);z-index:2100;align-items:center;justify-content:center;padding:16px">
   <div style="background:#fff;border-radius:12px;width:100%;max-width:680px;max-height:92vh;overflow-y:auto;padding:18px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -167,7 +203,12 @@
       <input id="sDistrito" placeholder="Distrito" maxlength="80" required style="padding:9px;border:1px solid var(--border);border-radius:6px">
       <input id="sReferencia" placeholder="Referencia (ej. frente al parque)" maxlength="200" style="padding:9px;border:1px solid var(--border);border-radius:6px">
       <div style="grid-column:1/-1">
-        <div class="muted" style="margin-bottom:4px">📍 Haz clic en el mapa para marcar el domicilio <span id="sPinEstado" style="color:var(--danger)">(falta marcar)</span></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
+          <button type="button" id="btnUbicar" class="btn-hdr" style="background:var(--navy);color:#fff">📍 Ubicar dirección en el mapa</button>
+          <button type="button" id="btnPedirUbic" class="btn-hdr" style="background:var(--teal);color:#fff">📲 Pedir al cliente que marque su ubicación</button>
+          <span class="muted">o toca el mapa / arrastra el pin <span id="sPinEstado" style="color:var(--danger)">(falta marcar)</span></span>
+        </div>
+        <div class="muted" id="sGeoMsg" style="min-height:16px;margin-bottom:4px"></div>
         <div id="mapaServicio" style="height:220px;border-radius:8px;border:1px solid var(--border)"></div>
       </div>
       <textarea id="sSintomas" rows="2" maxlength="500" placeholder="Síntomas" required style="grid-column:1/-1;padding:9px;border:1px solid var(--border);border-radius:6px;font-family:inherit"></textarea>
@@ -312,7 +353,7 @@ function renderSolicitudes(sols){
         ? ` <b style="color:var(--danger)">· 🔓 ${p.lib_7} liberaciones en 7 días</b>` : '';
       quien = `👨‍⚕️ ${esc(s.proveedor_asignado)}${s.proveedor_cmp ? ' · CMP ' + esc(s.proveedor_cmp) : ''}${s.proveedor_empresa ? ' · 🏢 ' + esc(s.proveedor_empresa) : ''}${senal}${alertaLib}`;
     } else if (s.ofrecido_a){
-      quien = `⏳ Ofrecido a ${esc(s.ofrecido_a)}`;
+      quien = `⏳ Empresa: ${esc(s.ofrecido_a)}`;
     } else if (s.estado === 'programada'){
       quien = s.cobertura_riesgo
         ? '<b style="color:var(--danger)">⚠️ Sin doctores conectados cerca de este lugar</b>'
@@ -322,8 +363,8 @@ function renderSolicitudes(sols){
     }
     const liberar = ESTADOS_LIBERABLES.includes(s.estado)
       ? `<div style="margin-top:6px"><button class="btn-liberar" data-liberar="${s.id}">🔓 Liberar servicio</button></div>` : '';
-    const activar = s.estado === 'programada'
-      ? `<div style="margin-top:6px"><button class="btn-liberar" style="color:var(--teal-dark);border-color:var(--teal)" data-activar="${s.id}">▶️ Buscar doctor ahora</button></div>` : '';
+    const activar = (s.estado === 'programada' || s.estado === 'sin_cobertura')
+      ? `<div style="margin-top:6px"><button class="btn-liberar" style="color:var(--teal-dark);border-color:var(--teal)" data-activar="${s.id}">${s.estado === 'sin_cobertura' ? '🔁 Reintentar búsqueda' : '▶️ Buscar doctor ahora'}</button></div>` : '';
     return `
       <div class="sol ${s.id === seleccionId ? 'sel' : ''}" style="border-left-color:${color}" data-id="${s.id}">
         <div class="top">
@@ -344,6 +385,7 @@ function renderSolicitudes(sols){
         ${s.novedad ? `<div style="margin-top:4px;padding:5px 7px;border-radius:6px;font-size:12.5px;${['trafico','problema','direccion'].includes(s.novedad.tipo) ? 'background:#fdecea;color:var(--danger);font-weight:600' : 'background:#eef6f2'}">📣 ${esc(s.novedad.texto)} <span class="muted">· hace ${minutosDesde(s.novedad.creado_en) ?? '?'} min</span></div>` : ''}
         <div class="muted">${quien}</div>
         ${s.tracking_token ? `<div class="muted"><a href="/track/${esc(s.tracking_token)}" target="_blank">Ver tracking</a></div>` : ''}
+        ${ESTADOS_ABIERTOS_UI.includes(s.estado) ? `<div style="margin-top:6px"><button class="btn-liberar" style="color:var(--navy);border-color:var(--navy)" data-sms="${s.id}" data-tel="${esc(s.cliente_telefono || '')}">📲 Enviar tracking por SMS</button></div>` : ''}
         ${liberar}${activar}
       </div>`;
   }).join('');
@@ -352,9 +394,24 @@ function renderSolicitudes(sols){
     ev.stopPropagation();                       // que no seleccione la tarjeta
     abrirLiberar(Number(b.dataset.liberar));
   });
+  cont.querySelectorAll('[data-sms]').forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const actual = String(b.dataset.tel || '').replace(/\D/g, '').replace(/^51/, '');
+    const num = prompt('Celular al que se enviará el enlace de seguimiento (9 dígitos):', actual);
+    if (num === null) return;
+    b.disabled = true;
+    try {
+      const r = await MadAuth.fetch(`/mad/admin/solicitudes/${b.dataset.sms}/enviar-tracking`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ telefono: num })
+      });
+      const d = await r.json();
+      alert(r.ok ? `✅ Seguimiento enviado al celular ${d.enviado_a}` : (d.error || 'No se pudo enviar'));
+    } catch (e) { alert('Sin conexión. Intenta de nuevo.'); }
+    setTimeout(() => { b.disabled = false; }, 30000);      // evita envíos repetidos por error
+  });
   cont.querySelectorAll('[data-activar]').forEach(b => b.onclick = async (ev) => {
     ev.stopPropagation();
-    if (!confirm('¿Empezar a buscar doctor ahora para este servicio programado?')) return;
+    if (!confirm('¿Empezar a buscar doctor ahora para este servicio?')) return;
     const r = await MadAuth.fetch(`/mad/admin/solicitudes/${b.dataset.activar}/activar`, { method: 'POST' });
     const d = await r.json();
     if (!r.ok) alert(d.error || 'No se pudo activar');
@@ -368,6 +425,7 @@ function insigniaLib(p){
     title="Ver detalle de liberaciones">🔓 ${p.lib_7} en 7 días · ${p.lib_30} en 30 días${p.alerta_lib ? ' ⚠️' : ''}</a>`;
 }
 
+const ESTADOS_ABIERTOS_UI = ['programada','buscando_proveedor','asignado','en_camino','llego','en_atencion'];
 let verTodosProv = false;   // por defecto solo conectados
 function renderProveedores(provs){
   const sel = datos.solicitudes.find(s => s.id === seleccionId);
@@ -396,6 +454,8 @@ function renderProveedores(provs){
         </div>
         <div class="acciones">
           ${tel ? `<a class="tel" href="tel:+${tel}">📞</a><a class="wa" href="https://wa.me/${tel}" target="_blank">WA</a>` : ''}
+          ${(sel && p.estado === 'disponible' && ['buscando_proveedor','sin_cobertura'].includes(sel.estado))
+            ? `<a href="#" class="tel" style="background:var(--navy)" data-ofrecer="${p.id}">📨 Ofrecer a su empresa #${sel.id}</a>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -404,6 +464,20 @@ function renderProveedores(provs){
     if (ev.target.closest('a')) return;   // no interferir con llamar, WhatsApp ni la insignia
     const p = provs.find(x => String(x.id) === el.dataset.pid);
     if (p && p.lat != null) map.setView([p.lat, p.lng], 15);
+  });
+  cont.querySelectorAll('[data-ofrecer]').forEach(a => a.onclick = async (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const p = provs.find(x => String(x.id) === a.dataset.ofrecer);
+    const km = (sel && p) ? distKm(sel, p).toFixed(1) : '?';
+    if (!confirm(`¿Ofrecer el servicio #${sel.id} a la empresa de ${p.nombre}? Está a ${km} km en línea recta.\nSe cancela cualquier oferta pendiente a otra empresa.`)) return;
+    try {
+      const r = await MadAuth.fetch(`/mad/admin/solicitudes/${sel.id}/ofrecer`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ proveedor_id: p.id })
+      });
+      const d = await r.json();
+      alert(r.ok ? `✅ Oferta enviada a la empresa de ${p.nombre}. Tiene 2 minutos para aceptar y 5 para asignar.` : (d.error || 'No se pudo ofrecer'));
+    } catch (e) { alert('Sin conexión. Intenta de nuevo.'); }
+    cargar();
   });
   cont.querySelectorAll('[data-lib]').forEach(a => a.onclick = (ev) => {
     ev.preventDefault(); ev.stopPropagation();
@@ -446,15 +520,18 @@ function renderMapa(sols, provs){
     if (s.lat == null) return;
     L.marker([s.lat, s.lng], { icon: pinSolicitud(s, s.id === seleccionId), zIndexOffset: 500 })
       .bindTooltip(`#${s.id} · ${TEXTO_SOL[s.estado] || esc(s.estado)} · ${esc(s.distrito || '')}`)
-      .on('click', () => seleccionar(s.id))
+      .on('click', (ev) => { if (medir.activo) medir.agregar(ev.latlng); else seleccionar(s.id); })
       .addTo(capaSol);
   });
 
   provs.forEach(p => {
     if (p.lat == null) return;
     const m = minutosDesde(p.actualizado_en);
+    const selSol = datos.solicitudes.find(x => x.id === seleccionId);
+    const aSol = selSol && selSol.lat != null ? ` · ${distKm(selSol, p).toFixed(1)} km del #${selSol.id}` : '';
     L.marker([p.lat, p.lng], { icon: pinProveedor(p) })
-      .bindTooltip(`${esc(p.nombre)} · ${esc(p.estado)} · señal hace ${m ?? '?'} min`)
+      .bindTooltip(`${esc(p.nombre)} · ${esc(p.estado)} · señal hace ${m ?? '?'} min${aSol}`)
+      .on('click', (ev) => { if (medir.activo) medir.agregar(ev.latlng); })
       .addTo(capaProv);
   });
 
@@ -481,10 +558,60 @@ leyenda.onAdd = () => {
     <i style="background:#D64545"></i>Sin cobertura<br>
     <b>Doctores</b> (círculo blanco con iniciales)<br>
     <i class="hueco" style="border-color:#2E9E5B"></i>Disponible <i class="hueco" style="border-color:#2d6cdf"></i>Ocupado
-    <i class="hueco" style="border-color:#E8A33D"></i>En oferta <i class="hueco" style="border-color:#9aa5ab"></i>Señal antigua (&gt;5 min)`;
+    <i class="hueco" style="border-color:#E8A33D"></i>En oferta <i class="hueco" style="border-color:#9aa5ab"></i>Señal antigua (&gt;5 min)<br>
+    <b>Distancias</b>: en línea recta. La barra de escala (abajo a la derecha) muestra cuántos km equivale al mapa. Para medir: botón 📏 del mapa.`;
   return d;
 };
 leyenda.addTo(map);
+
+/* Escala en km */
+L.control.scale({ metric:true, imperial:false, position:'bottomright', maxWidth:140 }).addTo(map);
+
+/* Regla: mide la distancia en línea recta entre puntos (clic en el mapa, en un doctor o en un servicio) */
+const medir = {
+  activo:false, puntos:[], linea:null, marcas:[], panel:null,
+  agregar(ll){
+    this.puntos.push(ll);
+    this.marcas.push(L.circleMarker(ll, { radius:4, color:'#0057b8', fillColor:'#fff', fillOpacity:1, weight:2, interactive:false }).addTo(map));
+    if (this.linea) this.linea.setLatLngs(this.puntos);
+    else this.linea = L.polyline(this.puntos, { color:'#0057b8', weight:3, dashArray:'6 6', interactive:false }).addTo(map);
+    this.mostrar();
+  },
+  total(){ let t = 0; for (let i = 1; i < this.puntos.length; i++) t += map.distance(this.puntos[i-1], this.puntos[i]); return t; },
+  mostrar(){
+    const m = this.total();
+    this.panel.querySelector('.res').textContent = this.puntos.length < 2
+      ? 'Haz clic en el mapa, en un doctor o en un servicio'
+      : (m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m') + ' en línea recta';
+  },
+  limpiar(){
+    this.puntos = []; this.marcas.forEach(x => map.removeLayer(x)); this.marcas = [];
+    if (this.linea){ map.removeLayer(this.linea); this.linea = null; }
+    this.mostrar();
+  },
+  alternar(){
+    this.activo = !this.activo;
+    this.panel.classList.toggle('on', this.activo);
+    map.getContainer().style.cursor = this.activo ? 'crosshair' : '';
+    if (!this.activo) this.limpiar(); else this.mostrar();
+  },
+};
+const ctlMedir = L.control({ position:'topright' });
+ctlMedir.onAdd = () => {
+  const d = L.DomUtil.create('div', 'leyenda');
+  d.innerHTML = `<a href="#" class="btnMedir" style="font-weight:700;text-decoration:none;color:#003876">📏 Medir distancia</a>
+    <div class="res" style="display:none;margin-top:4px"></div>
+    <a href="#" class="btnLimpiar" style="display:none;font-size:11px">Borrar medición</a>`;
+  L.DomEvent.disableClickPropagation(d);
+  medir.panel = d;
+  const res = d.querySelector('.res'), limp = d.querySelector('.btnLimpiar');
+  const sync = () => { res.style.display = medir.activo ? 'block' : 'none'; limp.style.display = medir.activo ? 'inline' : 'none'; };
+  d.querySelector('.btnMedir').onclick = (e) => { e.preventDefault(); medir.alternar(); sync(); };
+  limp.onclick = (e) => { e.preventDefault(); medir.limpiar(); };
+  return d;
+};
+ctlMedir.addTo(map);
+map.on('click', (ev) => { if (medir.activo) medir.agregar(ev.latlng); });
 
 /* Botones del header */
 document.getElementById('btnRefrescar').onclick = async (e) => {
@@ -597,6 +724,37 @@ async function cargarEmpresas(){
     empresas.filter(e => e.activo).map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join('');
 }
 
+let usuariosCache = [], editandoProv = null;
+function abrirEditarDoctor(u){
+  editandoProv = u.proveedor_id;
+  document.getElementById('dNombre').value = u.nombre || '';
+  document.getElementById('dTel').value = String(u.telefono || '').replace(/^51/, '');
+  document.getElementById('dCmp').value = u.cmp || '';
+  document.getElementById('dTipo').value = u.tipo_servicio || 'MAD';
+  document.getElementById('dError').textContent = '';
+  document.getElementById('modalDoc').style.display = 'flex';
+}
+document.getElementById('dCerrar').onclick = () => { document.getElementById('modalDoc').style.display = 'none'; };
+document.getElementById('formDoc').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('dGuardar'), err = document.getElementById('dError');
+  btn.disabled = true; err.textContent = '';
+  try {
+    const r = await MadAuth.fetch(`/mad/admin/proveedores/${editandoProv}/editar`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        nombre: document.getElementById('dNombre').value, telefono: document.getElementById('dTel').value,
+        cmp: document.getElementById('dCmp').value, tipo_servicio: document.getElementById('dTipo').value,
+      })
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || 'No se pudo guardar'; return; }
+    document.getElementById('modalDoc').style.display = 'none';
+    cargarUsuarios(); cargar();
+  } catch (ex) { err.textContent = 'Sin conexión. Intenta de nuevo.'; }
+  finally { btn.disabled = false; }
+};
+
 async function cargarUsuarios(){
   const r = await MadAuth.fetch('/mad/admin/usuarios');
   const d = await r.json();
@@ -611,17 +769,24 @@ async function cargarUsuarios(){
     return `
      <div class="prov">
        <div>
-         <b>${esc(u.nombre)}</b> <span class="muted">@${esc(u.usuario)} · ${esc(u.rol)}${u.tipo_servicio ? ' · ' + esc(u.tipo_servicio) : ''}${u.cmp ? ' · CMP ' + esc(u.cmp) : ''}${etiquetaEmpresa}</span><br>
+         <b>${esc(u.nombre)}</b> <span class="muted">@${esc(u.usuario)} · ${esc(u.rol)}${u.tipo_servicio ? ' · ' + esc(u.tipo_servicio) : ''}${u.cmp ? ' · CMP ' + esc(u.cmp) : (u.rol === 'proveedor' && u.tipo_servicio !== 'AMBULANCIA' ? ' · <b style="color:var(--danger)">Sin CMP</b>' : '')}${etiquetaEmpresa}</span><br>
          <span class="muted">${u.activo ? '✅ Activo' : '⛔ Inactivo'} · ${u.totp_activo ? '🔐 2FA activo' : '⚠️ Sin 2FA'}${u.bloqueado ? ' · 🔒 Bloqueado' : ''} · último ingreso: ${u.ultimo_login ? new Date(u.ultimo_login).toLocaleString('es-PE') : '—'}</span>
        </div>
        <div class="acciones">
          ${selEmp}
+         ${u.rol === 'proveedor' ? `<a href="#" class="tel" data-editar="${u.proveedor_id}">Editar</a>` : ''}
          <a href="#" class="tel" data-reset="${u.id}">Resetear</a>
          <a href="#" class="${u.activo ? 'tel' : 'wa'}" style="${u.activo ? 'background:var(--danger)' : ''}" data-estado="${u.id}" data-activo="${u.activo ? 0 : 1}">${u.activo ? 'Desactivar' : 'Activar'}</a>
        </div>
      </div>`;
   }).join('') || '<div class="vacio">Sin usuarios</div>';
 
+  usuariosCache = d.usuarios || [];
+  cont.querySelectorAll('[data-editar]').forEach(a => a.onclick = (e) => {
+    e.preventDefault();
+    const u = usuariosCache.find(x => String(x.proveedor_id) === a.dataset.editar);
+    if (u) abrirEditarDoctor(u);
+  });
   cont.querySelectorAll('[data-reset]').forEach(a => a.onclick = async (e) => {
     e.preventDefault();
     if (!confirm('¿Resetear clave y Google Authenticator? El usuario deberá configurarlo de nuevo.')) return;
@@ -708,23 +873,145 @@ document.getElementById('formProveedor').onsubmit = async (e) => {
    NUEVO SERVICIO DESDE EL MONITOR (call center)
    ========================================================= */
 let mapaSrv = null, pinSrv = null, coordsSrv = null;
+/* Pin editable: se puede arrastrar o tocar el mapa para afinar la ubicación */
+function ponerPin(latlng, centrar, texto){
+  coordsSrv = latlng;
+  if (!pinSrv){
+    pinSrv = L.marker(latlng, { draggable:true }).addTo(mapaSrv);
+    pinSrv.on('dragend', () => ponerPin(pinSrv.getLatLng(), false, 'ubicación ajustada ✓'));
+  } else pinSrv.setLatLng(latlng);
+  if (centrar) mapaSrv.setView(latlng, 17);
+  const e = document.getElementById('sPinEstado');
+  e.textContent = `(${texto || 'ubicación marcada ✓'})`; e.style.color = 'var(--teal-dark)';
+}
+
+/* Dirección → ubicación aproximada (OpenStreetMap/Nominatim, gratuito, sin costo por consulta) */
+let geoSeq = 0, geoUltima = '';
+function limpiarDireccion(d){
+  // quita dpto/piso/interior/oficina, que confunden al buscador
+  return d.replace(/\b(dpto|depto|departamento|int|interior|piso|of|oficina|mz|lote|lt)\.?\s*[\w-]*/gi, ' ').replace(/\s+/g,' ').trim();
+}
+async function nominatim(q){
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=pe&accept-language=es&q=' + encodeURIComponent(q);
+  const r = await fetch(url, { headers:{ 'Accept':'application/json' } });
+  if (!r.ok) throw new Error('geo');
+  const j = await r.json();
+  return j.length ? { lat:Number(j[0].lat), lng:Number(j[0].lon) } : null;
+}
+async function ubicarDireccion(manual){
+  const dir = document.getElementById('sDireccion').value.trim();
+  const dis = document.getElementById('sDistrito').value.trim();
+  const msg = document.getElementById('sGeoMsg');
+  if (dir.length < 5 || !dis){ if (manual) msg.textContent = 'Escribe la dirección y el distrito primero'; return; }
+  const clave = dir + '|' + dis;
+  if (!manual && clave === geoUltima) return;
+  geoUltima = clave;
+  const mi = ++geoSeq;
+  msg.textContent = '🔎 Buscando en el mapa…';
+  try {
+    const base = limpiarDireccion(dir);
+    const sinNumero = base.replace(/\s+\d+[a-z]?\s*$/i, '');
+    let pos = await nominatim(`${base}, ${dis}, Lima, Perú`);
+    let nivel = 'exacta';
+    if (!pos && sinNumero !== base){ pos = await nominatim(`${sinNumero}, ${dis}, Lima, Perú`); nivel = 'calle'; }
+    if (!pos){ pos = await nominatim(`${dis}, Lima, Perú`); nivel = 'distrito'; }
+    if (mi !== geoSeq) return;                 // llegó una búsqueda más nueva
+    if (!pos){ msg.textContent = 'No se encontró. Toca el mapa para marcar el punto.'; return; }
+    ponerPin(L.latLng(pos.lat, pos.lng), true, nivel === 'distrito' ? 'solo distrito: ajusta el pin' : 'ubicación aproximada: verifica y ajusta');
+    msg.textContent = nivel === 'exacta' ? '✅ Ubicación aproximada encontrada. Arrastra el pin o toca el mapa para afinarla.'
+      : nivel === 'calle' ? '⚠️ Se ubicó la calle (sin el número). Ajusta el pin al domicilio exacto.'
+      : '⚠️ Solo se encontró el distrito. Mueve el pin al domicilio exacto.';
+  } catch (e) {
+    if (mi === geoSeq) msg.textContent = 'No se pudo buscar ahora. Toca el mapa para marcar el punto.';
+  }
+}
+
+/* El cliente marca su domicilio desde un enlace SMS; aquí se recibe y se coloca el pin */
+let pedidoUbic = null, pollUbic = null;
+function detenerPollUbic(){ if (pollUbic){ clearInterval(pollUbic); pollUbic = null; } }
+async function pedirUbicacionCliente(){
+  const msg = document.getElementById('sGeoMsg');
+  const cel = document.getElementById('sCelular').value;
+  if (!cel.trim()){ msg.textContent = 'Escribe primero el celular del paciente'; return; }
+  const btn = document.getElementById('btnPedirUbic'); btn.disabled = true;
+  try {
+    const r = await MadAuth.fetch('/mad/admin/ubicaciones/pedir', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ telefono: cel, direccion: document.getElementById('sDireccion').value + ' ' + document.getElementById('sDistrito').value,
+                             centro_lat: coordsSrv ? coordsSrv.lat : null, centro_lng: coordsSrv ? coordsSrv.lng : null })
+    });
+    const d = await r.json();
+    if (!r.ok){ msg.textContent = d.error || 'No se pudo enviar el enlace'; return; }
+    pedidoUbic = d.pedido_id; detenerPollUbic();
+    msg.textContent = '📲 Enlace enviado. Esperando que el cliente marque su ubicación…';
+    const hasta = Date.now() + d.vigencia_min * 60000;
+    pollUbic = setInterval(async () => {
+      if (Date.now() > hasta){ detenerPollUbic(); msg.textContent = 'El enlace venció. Pídelo de nuevo.'; return; }
+      try {
+        const rr = await MadAuth.fetch(`/mad/admin/ubicaciones/${pedidoUbic}`);
+        const dd = await rr.json();
+        if (dd.estado === 'respondida'){
+          detenerPollUbic();
+          ponerPin(L.latLng(dd.lat, dd.lng), true, 'confirmada por el cliente ✓');
+          msg.textContent = '✅ El cliente marcó su ubicación' + (dd.precision_m ? ` (precisión GPS ~${dd.precision_m} m)` : '') + '. Puedes ajustarla si hace falta.';
+        } else if (dd.estado === 'expirada'){ detenerPollUbic(); msg.textContent = 'El enlace venció. Pídelo de nuevo.'; }
+      } catch (e) { /* reintenta en el próximo ciclo */ }
+    }, 4000);
+  } catch (e) { msg.textContent = 'Sin conexión. Intenta de nuevo.'; }
+  finally { btn.disabled = false; }
+}
+
 function abrirNuevoServicio(){
   document.getElementById('modalServicio').style.display = 'flex';
   document.getElementById('sError').textContent = '';
   if (!mapaSrv){
     mapaSrv = L.map('mapaServicio').setView([-12.0464, -77.0428], 12);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(mapaSrv);
-    mapaSrv.on('click', (ev) => {
-      coordsSrv = ev.latlng;
-      if (!pinSrv) pinSrv = L.marker(ev.latlng).addTo(mapaSrv); else pinSrv.setLatLng(ev.latlng);
-      const e = document.getElementById('sPinEstado'); e.textContent = '(ubicación marcada ✓)'; e.style.color = 'var(--teal-dark)';
-    });
+    mapaSrv.on('click', (ev) => ponerPin(ev.latlng, false, 'ubicación ajustada ✓'));
   }
   setTimeout(() => mapaSrv.invalidateSize(), 150);
 }
+
+/* ---------- Prioridades de empresas ---------- */
+let priorDatos = [];
+async function abrirPrioridades(){
+  document.getElementById('priorMsg').textContent = 'Cargando…';
+  document.getElementById('modalPrior').style.display = 'flex';
+  try {
+    const r = await MadAuth.fetch('/mad/admin/prioridades');
+    const d = await r.json();
+    priorDatos = d.empresas || [];
+  } catch (e) { document.getElementById('priorMsg').textContent = 'Sin conexión.'; return; }
+  document.getElementById('priorMsg').textContent = '';
+  const esc = (t) => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  document.getElementById('priorBody').innerHTML = priorDatos.map((e, i) => `
+    <tr style="border-bottom:1px solid #eee${e.activo ? '' : ';opacity:.5'}">
+      <td>${esc(e.nombre)}${e.activo ? '' : ' (inactiva)'}</td><td>${e.doctores}</td>
+      <td><input type="number" min="0" max="1000" data-i="${i}" data-k="peso_mad" value="${e.peso_mad}" style="width:70px"></td>
+      <td><input type="number" min="0" max="1000" data-i="${i}" data-k="peso_ambulancia" value="${e.peso_ambulancia}" style="width:70px"></td>
+      <td><input type="tel" data-i="${i}" data-k="celular_alertas" value="${esc(e.celular_alertas || '')}" placeholder="9XXXXXXXX" style="width:120px"></td>
+    </tr>`).join('');
+}
+document.getElementById('btnPrioridades').onclick = abrirPrioridades;
+document.getElementById('btnCerrarPrior').onclick = () => document.getElementById('modalPrior').style.display = 'none';
+document.getElementById('btnGuardarPrior').onclick = async () => {
+  document.querySelectorAll('#priorBody input').forEach(inp => { priorDatos[+inp.dataset.i][inp.dataset.k] = inp.value; });
+  const msg = document.getElementById('priorMsg');
+  msg.textContent = 'Guardando…';
+  try {
+    const r = await MadAuth.fetch('/mad/admin/prioridades', { method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ empresas: priorDatos }) });
+    const d = await r.json();
+    msg.textContent = r.ok ? '✅ Guardado.' : (d.error || 'No se pudo guardar');
+  } catch (e) { msg.textContent = 'Sin conexión.'; }
+};
 document.getElementById('btnNuevoServicio').onclick = abrirNuevoServicio;
+document.getElementById('btnUbicar').onclick = () => ubicarDireccion(true);
+document.getElementById('btnPedirUbic').onclick = pedirUbicacionCliente;
+document.getElementById('sDistrito').addEventListener('blur', () => ubicarDireccion(false));
+document.getElementById('sDireccion').addEventListener('blur', () => ubicarDireccion(false));
 document.getElementById('btnVerTodosProv').onclick = () => { verTodosProv = !verTodosProv; renderProveedores(datos.proveedores); };
-document.getElementById('btnCerrarServicio').onclick = () => { document.getElementById('modalServicio').style.display = 'none'; };
+document.getElementById('btnCerrarServicio').onclick = () => { detenerPollUbic(); document.getElementById('modalServicio').style.display = 'none'; };
 document.getElementById('sProgramar').onchange = (e) => { document.getElementById('sFecha').style.display = e.target.checked ? 'block' : 'none'; };
 document.getElementById('formServicio').onsubmit = async (e) => {
   e.preventDefault();
@@ -753,7 +1040,7 @@ document.getElementById('formServicio').onsubmit = async (e) => {
     e.target.reset();
     document.getElementById('sFecha').style.display = 'none';
     if (pinSrv){ mapaSrv.removeLayer(pinSrv); pinSrv = null; } coordsSrv = null;
-    const pe = document.getElementById('sPinEstado'); pe.textContent = '(falta marcar)'; pe.style.color = 'var(--danger)';
+    const pe = document.getElementById('sPinEstado'); pe.textContent = '(falta marcar)'; pe.style.color = 'var(--danger)'; geoUltima = ''; document.getElementById('sGeoMsg').textContent = '';
     document.getElementById('modalServicio').style.display = 'none';
     cargar();
     alert(`Servicio #${d.solicitud_id} enviado a los proveedores.`);

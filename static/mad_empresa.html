@@ -477,10 +477,10 @@ async function cargarOfertas(){
   const b = d.por_asignar.map(x => `
     <div style="border:2px solid #2E9E5B;border-radius:8px;padding:10px;margin-bottom:8px">
       <b>${nom(x.tipo)}</b> · ${esc(x.direccion || '')} ${esc(x.distrito || '')}${x.referencia ? ' · Ref: ' + esc(x.referencia) : ''}${cuando(x)}
-      <div class="muted"><b>Asigna un doctor</b> — te quedan ${mmss(x.segundos_restantes)}; si no, el servicio pasa a otra empresa.</div>
+      <div class="muted"><b>Asigna un doctor</b> — te quedan ${mmss(x.segundos_restantes)}; si no, el servicio pasa a otra empresa. Si eliges uno fuera de línea, le llega SMS y debe abrir la app y conectarse.</div>
       <div style="margin-top:6px">${x.doctores.length ? x.doctores.map(dc =>
-        `<button class="btn" style="margin:2px" data-asigna="${x.solicitud_id}" data-doc="${dc.id}">👨‍⚕️ ${esc(dc.nombre)}${dc.km != null ? ' · ' + dc.km + ' km' : ''}</button>`).join('')
-        : '<b style="color:#c0392b">Ninguno de tus doctores está disponible en línea ahora.</b>'}</div>
+        `<button class="btn${dc.en_linea ? '' : ' sec'}" style="margin:2px" data-asigna="${x.solicitud_id}" data-doc="${dc.id}">👨‍⚕️ ${esc(dc.nombre)}${dc.en_linea ? (dc.km != null ? ' · ' + dc.km + ' km' : '') : ' · fuera de línea'}</button>`).join('')
+        : '<b style="color:#c0392b">Ninguno de tus doctores está libre ahora.</b>'}</div>
     </div>`).join('');
   $('listaOfertas').innerHTML = a + b;
   document.querySelectorAll('[data-acepta],[data-rechaza]').forEach(btn => btn.onclick = async () => {

@@ -13,6 +13,57 @@
     del() { try { localStorage.removeItem(DEV); } catch (e) {} },
   };
 
+  // ── Ingreso con huella (solo app Android del doctor, v1.3 o más nueva) ──
+  const bio = (() => {
+    const pend = {};
+    window.__madBioCb = (id, ok, dato, err) => { const f = pend[id]; if (f) { delete pend[id]; f({ ok, dato, err }); } };
+    const hay = () => !!(window.MadNativo && typeof window.MadNativo.bioDisponible === 'function');
+    function llamarNativo(fn) {
+      return new Promise((res) => {
+        const id = 'b' + Date.now() + Math.random().toString(36).slice(2);
+        pend[id] = res;
+        try { fn(id); } catch (e) { delete pend[id]; res({ ok: false, err: 'error' }); }
+        setTimeout(() => { if (pend[id]) { delete pend[id]; res({ ok: false, err: 'tiempo' }); } }, 60000);
+      });
+    }
+    return {
+      disponible() { try { return hay() ? window.MadNativo.bioDisponible() : 'no_soportado'; } catch (e) { return 'no_soportado'; } },
+      activo() { try { return hay() && window.MadNativo.bioActivo() === '1'; } catch (e) { return false; } },
+      guardar(usuario, token) { return llamarNativo((id) => window.MadNativo.bioGuardar(id, usuario, token)); },
+      leer() { return llamarNativo((id) => window.MadNativo.bioLeer(id)); },
+      borrar() { try { window.MadNativo.bioBorrar(); } catch (e) {} },
+    };
+  })();
+
+  // Pide un token al servidor (requiere la sesión completa abierta con clave) y lo guarda protegido por la huella
+  async function activarHuella() {
+    const a = await llamar('/mad/auth/biometrico/activar', {});
+    if (!a.ok) return { ok: false, msg: a.data.error || 'No se pudo activar' };
+    const g = await bio.guardar(a.data.usuario, a.data.token_biometrico);
+    if (!g.ok) return { ok: false, msg: g.err === 'cancelado' ? 'No se activó la huella.' : 'No se pudo activar la huella en este celular.' };
+    return { ok: true };
+  }
+
+  function ofrecerHuella() {
+    if (bio.disponible() !== 'ok' || bio.activo() || document.getElementById('madBioOferta')) return;
+    const ov = document.createElement('div');
+    ov.id = 'madBioOferta';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:6000;background:rgba(0,40,80,.5);display:flex;align-items:center;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px;max-width:340px;width:100%;text-align:center;color:#1f2937">'
+      + '<div style="font-size:38px">👆</div><h3 style="margin:6px 0;color:#003876;font-size:18px">¿Entrar con tu huella?</h3>'
+      + '<p style="font-size:13.5px;color:#6b7a82;line-height:1.45;margin:0 0 14px">La próxima vez podrás ingresar con la huella de tu celular, sin escribir usuario ni clave.</p>'
+      + '<button id="hSi" style="width:100%;padding:12px;background:#0057b8;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;margin-bottom:8px">Activar</button>'
+      + '<button id="hNo" style="width:100%;padding:10px;background:none;color:#6b7a82;border:none;font-size:14px">Ahora no</button>'
+      + '<div id="hErr" style="color:#c0392b;font-size:12.5px;min-height:16px;margin-top:6px"></div></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('#hNo').onclick = () => ov.remove();
+    ov.querySelector('#hSi').onclick = async (e) => {
+      e.target.disabled = true;
+      const r = await activarHuella();
+      if (r.ok) ov.remove(); else { ov.querySelector('#hErr').textContent = r.msg; e.target.disabled = false; }
+    };
+  }
+
   async function llamar(path, body, tokenParcial) {
     const headers = { 'Content-Type': 'application/json' };
     const t = tokenParcial || almacen.get();
@@ -104,13 +155,45 @@
         else pantallaCodigo();
       }
 
+      let huellaAutoIntentada = false;
+      async function entrarConHuella() {
+        const e0 = ui.q('.error'); if (e0) e0.textContent = '';
+        const r = await bio.leer();
+        if (!r.ok) {
+          if (r.err === 'invalidado') { bio.borrar(); pantallaLogin('Cambió la huella registrada en el celular. Ingresa con tu clave y vuelve a activarla.'); }
+          else if (r.err !== 'cancelado') { const e = ui.q('.error'); if (e) e.textContent = 'No se pudo leer la huella. Ingresa con tu clave.'; }
+          return;
+        }
+        let cred = null;
+        try { cred = JSON.parse(r.dato); } catch (e) {}
+        if (!cred || !cred.u || !cred.t) { bio.borrar(); pantallaLogin('Vuelve a ingresar con tu clave.'); return; }
+        const l = await llamar('/mad/auth/biometrico', { usuario: cred.u, token: cred.t });
+        if (!l.ok) {
+          if (l.status === 401) { bio.borrar(); pantallaLogin(l.data.error || 'Ingresa con tu clave.'); }
+          else { const e = ui.q('.error'); if (e) e.textContent = 'Error de conexión, intenta nuevamente'; }
+          return;
+        }
+        if (l.data.usuario.rol !== rol) {
+          await llamar('/mad/auth/logout', {}, l.data.token);
+          pantallaLogin('Este usuario no tiene acceso a esta pantalla');
+          return;
+        }
+        almacen.set(l.data.token); ui.quitar(); resolve(l.data.usuario);
+      }
+
       function pantallaLogin(mensaje) {
+        const conHuella = bio.activo();
         ui.render(`<p>Ingresa con tu usuario y clave</p>
+          ${conHuella ? '<button type="button" id="bBio" style="background:#fff;color:#003876;border:2px solid #003876;margin-bottom:12px">👆 Entrar con huella</button>' : ''}
           <form><input id="u" autocomplete="username" autocapitalize="none" placeholder="Usuario">
           <input id="p" type="password" autocomplete="current-password" placeholder="Clave">
           <button type="submit">Ingresar</button></form><div class="error"></div>`);
         if (mensaje) ui.q('.error').textContent = mensaje;
-        ui.q('form').onsubmit = (e) => { e.preventDefault(); enviar(ui.q('button'), async (err) => {
+        if (conHuella) {
+          ui.q('#bBio').onclick = entrarConHuella;
+          if (!mensaje && !huellaAutoIntentada) { huellaAutoIntentada = true; setTimeout(entrarConHuella, 300); }
+        }
+        ui.q('form').onsubmit = (e) => { e.preventDefault(); enviar(ui.q('form button[type=submit]'), async (err) => {
           const r = await llamar('/mad/auth/login', { usuario: ui.q('#u').value, password: ui.q('#p').value,
                                                       token_dispositivo: dispositivo.get() || undefined });
           if (!r.ok) { err.textContent = r.data.error || 'No se pudo ingresar'; return; }
@@ -122,6 +205,7 @@
               return;
             }
             almacen.set(r.data.token); ui.quitar(); resolve(r.data.usuario);
+            setTimeout(ofrecerHuella, 1200);
             return;
           }
           parcial = r.data.token_parcial;
@@ -183,6 +267,7 @@
           almacen.set(r.data.token);
           ui.quitar();
           resolve(r.data.usuario);
+          setTimeout(ofrecerHuella, 1200);
         }); };
       }
 
@@ -197,7 +282,12 @@
     location.reload();
   }
 
-  const MadAuth = { iniciar, fetch: authFetch, cerrarSesion, paginaLogin: null };
+  const huella = {
+    estado() { const d = bio.disponible(); return d !== 'ok' ? d : (bio.activo() ? 'activo' : 'ok'); },
+    activar: activarHuella,
+    desactivar() { bio.borrar(); },
+  };
+  const MadAuth = { iniciar, fetch: authFetch, cerrarSesion, paginaLogin: null, huella };
   window.MadAuth = MadAuth;
 })();
 

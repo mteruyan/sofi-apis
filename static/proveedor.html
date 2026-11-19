@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Panel de Proveedor — Sanitas</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
 <meta name="robots" content="noindex, nofollow">
 
 <link rel="manifest" href="/proveedor.webmanifest">
@@ -162,6 +163,10 @@
   .btn-hist{ background:var(--azul-claro); color:#fff; border:none; border-radius:9px; padding:10px 12px; font-weight:700; font-size:13px; cursor:pointer; }
   .btn-informar{ width:100%; margin-top:10px; background:#fff; color:var(--azul); border:1.5px solid var(--azul-claro); border-radius:10px; padding:12px; font-weight:700; font-size:14px; cursor:pointer; }
   .datos-clinicos{ margin-top:10px; background:#fff8e8; border:1px solid #f0d9a4; border-radius:10px; padding:10px 12px; font-size:13.5px; line-height:1.4; }
+  .msgs-cliente{ margin-top:10px; background:#e8f1fb; border:1px solid #b9d3f2; border-radius:10px; padding:10px 12px; font-size:14px; }
+  .msgs-cliente b{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#0057b8; margin-bottom:4px; }
+  .msgs-cliente div{ padding:3px 0; border-top:1px solid #d3e3f6; }
+  .msgs-cliente small{ color:#6b7a82; }
   .datos-clinicos b{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#8a6410; margin-top:6px; }
   .datos-clinicos b:first-child{ margin-top:0; }
   .datos-clinicos .alergia{ color:var(--rojo); font-weight:700; }
@@ -202,6 +207,12 @@
     <main>
       <div id="avisoApk" style="display:none;background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px">
         📲 Hay una versión nueva de la app. <a href="/static/app/sanitas-proveedor.apk" style="color:var(--azul);font-weight:700">Descargar e instalar</a>
+      </div>
+      <div id="cardHuella" class="card" style="display:none">
+        <b>👆 Ingreso con huella</b>
+        <p id="txtHuella" style="font-size:13px;color:var(--texto-mute);margin:6px 0 10px"></p>
+        <button id="btnHuella" class="btn-hist" style="display:inline-block"></button>
+        <div id="errHuella" style="color:var(--rojo);font-size:12.5px;margin-top:6px"></div>
       </div>
       <div id="cardApk" class="card" style="display:none">
         <b>📱 App para Android</b>
@@ -295,7 +306,7 @@
    CONFIG
    ========================================================= */
 const API_BASE = window.location.origin;
-const APP_VERSION = "2026-10-27.1";          // debe coincidir con MAD_APP_VERSION de main_mad.py
+const APP_VERSION = "2026-10-29.1";          // debe coincidir con MAD_APP_VERSION de main_mad.py
 const POLL_INTERVAL_MS = 8000;
 const UBICACION_INTERVAL_ACTIVO_MS = 10000;   // mientras está disponible: cada 10 s
 
@@ -423,6 +434,7 @@ function marcarConexion(ok) {
 /* =========================================================
    RENDER PRINCIPAL
    ========================================================= */
+let ultimoMsgCliente = null;
 function renderContenido(data) {
   const firma = JSON.stringify([data.oferta_pendiente, data.servicio_activo, disponible]);
   if (firma === ultimaFirma) return;      // nada cambió: no se redibuja (evita el parpadeo del mapa)
@@ -440,6 +452,9 @@ function renderContenido(data) {
   }
 
   if (data.servicio_activo) {
+    { const ms = data.servicio_activo.mensajes_cliente || []; const u = ms.length ? ms[ms.length - 1].id : 0;
+      if (ultimoMsgCliente !== null && u > ultimoMsgCliente) { try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {} }
+      ultimoMsgCliente = Math.max(ultimoMsgCliente || 0, u); }
     if (data.servicio_activo.estado === 'asignado') { try { if (navigator.vibrate) navigator.vibrate([400, 200, 400]); } catch (e) {} }
     cont.innerHTML = renderServicioActivo(data.servicio_activo);
     inicializarMapaServicio(data.servicio_activo);
@@ -546,6 +561,7 @@ function renderServicioActivo(servicio) {
         ${servicio.alergias ? `<b>Alergias a medicamentos</b><span class="alergia">${esc(servicio.alergias)}</span>` : ''}
         ${servicio.copago_monto != null ? `<b>Copago a cobrar</b>S/ ${esc(Number(servicio.copago_monto).toFixed(2))} · ${esc(({efectivo:'Efectivo',tarjeta:'Tarjeta',yape_plin:'Yape / Plin'})[servicio.forma_pago] || '')}` : ''}
       </div>` : ''}
+      ${(servicio.mensajes_cliente || []).length ? `<div class="msgs-cliente"><b>💬 Mensajes del cliente</b>${servicio.mensajes_cliente.map(m => `<div>${esc(m.texto)} <small>${m.creado_en ? esc(new Date(m.creado_en).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit', timeZone:'America/Lima'})) : ''}</small></div>`).join('')}</div>` : ''}
       ${['asignado','en_camino','llego'].includes(servicio.estado) ? `<button class="btn-informar" id="btnInformar">📣 Informar al cliente</button>` : ''}
       <div id="mapaServicio"></div>
       <div class="botones-accion">
@@ -925,6 +941,37 @@ async function darDeBajaPush() {
     if (sub) await sub.unsubscribe();
   } catch (e) {}
 }
+
+/* Ingreso con huella (solo dentro de la app Android v1.3+) */
+(function () {
+  if (!NATIVO || !window.MadAuth || !MadAuth.huella) return;
+  const card = document.getElementById('cardHuella'), txt = document.getElementById('txtHuella'),
+        btn = document.getElementById('btnHuella'), err = document.getElementById('errHuella');
+  function pintar() {
+    const e = MadAuth.huella.estado();
+    err.textContent = '';
+    if (e === 'activo') {
+      card.style.display = 'block';
+      txt.textContent = 'Activado: al abrir la app puedes entrar con la huella de tu celular.';
+      btn.textContent = 'Desactivar'; btn.onclick = () => { MadAuth.huella.desactivar(); pintar(); };
+    } else if (e === 'ok') {
+      card.style.display = 'block';
+      txt.textContent = 'Entra a la app con tu huella, sin escribir usuario ni clave.';
+      btn.textContent = 'Activar';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const r = await MadAuth.huella.activar();
+        btn.disabled = false;
+        if (r.ok) pintar(); else err.textContent = r.msg;
+      };
+    } else if (e === 'no_enrolado') {
+      card.style.display = 'block';
+      txt.textContent = 'Para usar tu huella, primero regístrala en los ajustes de seguridad del celular.';
+      btn.style.display = 'none';
+    }
+  }
+  pintar();
+})();
 
 /* =========================================================
    PWA: registro e instalación

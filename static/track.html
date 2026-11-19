@@ -4,7 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Seguimiento del servicio</title>
+<link rel="icon" type="image/x-icon" href="/assets/favicon_sanitas.ico">
 <meta name="robots" content="noindex, nofollow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sanitas">
+<meta property="og:title" content="Sigue tu servicio de Sanitas">
+<meta property="og:description" content="Mira en tiempo real cómo llega tu médico o ambulancia.">
+<meta property="og:image" content="__BASE_URL__/static/og-sanitas.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="__BASE_URL__/static/og-sanitas.png">
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -313,6 +323,16 @@
     text-align:right;
   }
 
+  .chat-cli{ margin:14px 16px 0; background:#fff; border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px; }
+  .chat-cli h4{ margin:0 0 8px; font-size:12.5px; color:var(--muted); font-weight:600; letter-spacing:.02em; text-transform:uppercase; }
+  .chat-cli .enviados{ font-size:13.5px; margin-bottom:8px; }
+  .chat-cli .enviados div{ background:#e8f1fb; border-radius:10px; padding:6px 10px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; }
+  .chat-cli .enviados small{ color:var(--muted); white-space:nowrap; }
+  .chat-cli form{ display:flex; gap:8px; }
+  .chat-cli input{ flex:1; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:10px; font-size:15px; }
+  .chat-cli button{ padding:10px 16px; border:0; border-radius:10px; background:#0057b8; color:#fff; font-weight:700; font-size:14px; }
+  .chat-cli button:disabled{ opacity:.6; }
+  .chat-cli .err{ color:#c0392b; font-size:12.5px; min-height:16px; margin-top:6px; }
   .novedades{ margin:14px 16px 0; background:#fff; border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px; }
   .novedades h4{ margin:0 0 8px; font-size:12.5px; color:var(--muted); font-weight:600; letter-spacing:.02em; text-transform:uppercase; }
   .nov-item{ display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:14px; line-height:1.35; }
@@ -465,6 +485,16 @@
   <div class="novedades" id="boxNovedades" style="display:none">
     <h4>Avisos de tu médico</h4>
     <div id="listaNovedades"></div>
+  </div>
+
+  <div class="chat-cli" id="boxChat" style="display:none">
+    <h4>Escríbele a tu médico</h4>
+    <div class="enviados" id="chatEnviados"></div>
+    <form id="formChat" autocomplete="off">
+      <input id="chatTexto" maxlength="200" placeholder="Ej: El portón es negro, toca el timbre 2" enterkeyhint="send">
+      <button type="submit" id="chatBtn">Enviar</button>
+    </form>
+    <div class="err" id="chatErr"></div>
   </div>
 
   <div class="detail">
@@ -644,6 +674,35 @@ function renderNovedades(lista){
   });
 }
 
+/* Mensajes del cliente al médico */
+function renderChat(data){
+  const box = document.getElementById('boxChat');
+  box.style.display = data.puede_escribir ? 'block' : 'none';
+  const cont = document.getElementById('chatEnviados');
+  cont.textContent = '';
+  (data.mis_mensajes || []).forEach(m => {
+    const f = document.createElement('div');
+    const t = document.createElement('span'); t.textContent = m.texto;
+    const h = document.createElement('small');
+    h.textContent = m.creado_en ? new Date(m.creado_en).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', timeZone:'America/Lima' }) : '';
+    f.append(t, h); cont.appendChild(f);
+  });
+}
+document.getElementById('formChat').onsubmit = async (e) => {
+  e.preventDefault();
+  const inp = document.getElementById('chatTexto'), btn = document.getElementById('chatBtn'), err = document.getElementById('chatErr');
+  const texto = inp.value.trim();
+  if (texto.length < 2) return;
+  err.textContent = ''; btn.disabled = true;
+  try {
+    const res = await fetch(`/track/${TRACKING_TOKEN}/mensaje`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ texto }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { inp.value = ''; consultarEstado(); }
+    else err.textContent = d.error || 'No se pudo enviar';
+  } catch (x) { err.textContent = 'Sin conexión. Intenta de nuevo.'; }
+  btn.disabled = false;
+};
+
 function render(data){
   datosTracking = data;
   ultimaActMs = Date.now();
@@ -739,6 +798,7 @@ function render(data){
     document.getElementById('detEmpresa').textContent = data.proveedor_empresa ? `Empresa: ${data.proveedor_empresa}` : '';
   }
   renderNovedades(hayDoc ? (data.novedades || []) : []);
+  renderChat(data);
 
   document.getElementById('cancelWrap').style.display =
     ESTADOS_CANCELABLES.includes(data.estado) ? 'block' : 'none';

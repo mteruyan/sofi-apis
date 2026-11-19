@@ -74,7 +74,7 @@ RADIO_MAXIMO_METROS = 40000     # radios de búsqueda: 5, 12.5, 20, 27.5, 35 y 4
 ESPERA_REINTENTO_SIN_PROVEEDOR_SEGUNDOS = 45   # menor que el intervalo del scheduler (60 s)
 MAD_ALERTA_CELULARES = [c.strip() for c in os.environ.get("MAD_ALERTA_CELULARES", "").split(",") if c.strip()]
 # Cambiar este valor (y APP_VERSION en proveedor.html) cada vez que se publique una versión nueva del panel
-MAD_APP_VERSION = "2026-10-27.1"
+MAD_APP_VERSION = "2026-10-29.1"
 # Ubicación vieja tolerada: un doctor "disponible" recibe ofertas según su ÚLTIMA posición conocida mientras
 # no pase de este tiempo; pasado esto se desconecta solo. Con avisos push el doctor no necesita tener la app abierta.
 MAD_APK_VERSION = os.environ.get("MAD_APK_VERSION", "1.0")      # versión vigente de la app Android (APK)
@@ -298,20 +298,21 @@ MAD_DISPOSITIVO_DIAS = int(os.environ.get("MAD_DISPOSITIVO_DIAS", "30"))
 MAD_MAX_DISPOSITIVOS = 3          # celulares de confianza por usuario
 
 
-def _mad_crear_dispositivo(cur, usuario_id, etiqueta=None):
-    """Celular de confianza: permite entrar sin código de Google Authenticator por MAD_DISPOSITIVO_DIAS días.
-    Solo se entrega tras un código TOTP correcto. Guarda únicamente el hash del token."""
+def _mad_crear_dispositivo(cur, usuario_id, etiqueta=None, tipo="confianza"):
+    """Celular de confianza ('confianza': entra sin código de Authenticator tras usuario y clave) o
+    ingreso con huella ('biometrico': reemplaza la clave en ese celular). Ambos duran MAD_DISPOSITIVO_DIAS días.
+    Solo se entrega con sesión completa. Guarda únicamente el hash del token."""
     token = secrets.token_urlsafe(32)
     cur.execute("""
         UPDATE mad_dispositivos SET revocado = TRUE
-        WHERE usuario_id = %s AND NOT revocado
-          AND id NOT IN (SELECT id FROM mad_dispositivos WHERE usuario_id = %s AND NOT revocado AND expira_en > NOW()
-                         ORDER BY id DESC LIMIT %s)
-    """, (usuario_id, usuario_id, MAD_MAX_DISPOSITIVOS - 1))
+        WHERE usuario_id = %s AND tipo = %s AND NOT revocado
+          AND id NOT IN (SELECT id FROM mad_dispositivos WHERE usuario_id = %s AND tipo = %s AND NOT revocado
+                         AND expira_en > NOW() ORDER BY id DESC LIMIT %s)
+    """, (usuario_id, tipo, usuario_id, tipo, MAD_MAX_DISPOSITIVOS - 1))
     cur.execute(f"""
-        INSERT INTO mad_dispositivos (usuario_id, token_hash, etiqueta, expira_en)
-        VALUES (%s, %s, %s, NOW() + INTERVAL '{MAD_DISPOSITIVO_DIAS} days')
-    """, (usuario_id, _mad_hash_token(token), (etiqueta or "")[:120]))
+        INSERT INTO mad_dispositivos (usuario_id, token_hash, etiqueta, tipo, expira_en)
+        VALUES (%s, %s, %s, %s, NOW() + INTERVAL '{MAD_DISPOSITIVO_DIAS} days')
+    """, (usuario_id, _mad_hash_token(token), (etiqueta or "")[:120], tipo))
     return token
 
 
@@ -444,6 +445,7 @@ def handle_mad_login(request):
                 SELECT d.id, u.nombre, u.rol, u.proveedor_id
                 FROM mad_dispositivos d JOIN mad_usuarios u ON u.id = d.usuario_id
                 WHERE d.token_hash = %s AND d.usuario_id = %s AND NOT d.revocado AND d.expira_en > NOW()
+                  AND d.tipo = 'confianza'
                   AND u.rol = 'proveedor' AND u.totp_activo AND NOT u.debe_cambiar_password
             """, (_mad_hash_token(tok_disp), uid))
             d = cur.fetchone()
@@ -466,6 +468,64 @@ def handle_mad_login(request):
 
     siguiente = "cambiar_password" if debe_cambiar else ("totp" if totp_activo else "enrolar_totp")
     return _mad_json({"token_parcial": token, "siguiente": siguiente, "dispositivo_invalido": dispositivo_invalido})
+
+
+# ── Ingreso con huella (solo doctores, app Android) ──
+# El celular guarda el token cifrado con una llave que solo se abre con la huella. El servidor guarda su hash.
+@con_log_errores
+def handle_mad_biometrico_activar(request):
+    """Con la sesión completa abierta (entró con clave), entrega el token para guardar con huella."""
+    s, err = _mad_exigir(request, "proveedor")
+    if err:
+        return err
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT totp_activo, debe_cambiar_password FROM mad_usuarios WHERE id = %s", (s["id"],))
+        r = cur.fetchone()
+        if not r or not r[0] or r[1]:
+            return _mad_json({"error": "Completa primero la configuración de tu cuenta"}, 409)
+        token = _mad_crear_dispositivo(cur, s["id"], "huella app", tipo="biometrico")
+        _mad_audit(cur, s["id"], "biometrico_activar", f"usuario:{s['id']}")
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return _mad_json({"token_biometrico": token, "usuario": s["usuario"], "dias": MAD_DISPOSITIVO_DIAS})
+
+
+@con_log_errores
+def handle_mad_biometrico_login(request):
+    data = request.get_json(force=True, silent=True) or {}
+    usuario = (data.get("usuario") or "").strip().lower()
+    tok = str(data.get("token") or "")
+    if not usuario or not tok:
+        return _mad_json({"error": "Datos incompletos"}, 400)
+
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT d.id, u.id, u.nombre, u.rol, u.proveedor_id
+            FROM mad_dispositivos d JOIN mad_usuarios u ON u.id = d.usuario_id
+            WHERE u.usuario = %s AND d.token_hash = %s AND d.tipo = 'biometrico'
+              AND NOT d.revocado AND d.expira_en > NOW()
+              AND u.activo AND u.rol = 'proveedor' AND u.totp_activo AND NOT u.debe_cambiar_password
+              AND NOT COALESCE(u.bloqueado_hasta > NOW(), FALSE)
+            FOR UPDATE OF d
+        """, (usuario, _mad_hash_token(tok)))
+        d = cur.fetchone()
+        if not d:
+            return _mad_json({"error": "El ingreso con huella ya no es válido. Ingresa con tu clave."}, 401)
+        # La vigencia se renueva con cada uso
+        cur.execute(f"""UPDATE mad_dispositivos SET ultimo_uso = NOW(), expira_en = NOW() + INTERVAL '{MAD_DISPOSITIVO_DIAS} days'
+                        WHERE id = %s""", (d[0],))
+        cur.execute("UPDATE mad_usuarios SET ultimo_login = NOW() WHERE id = %s", (d[1],))
+        token_completo = _mad_crear_sesion(cur, d[1], "completa")
+        _mad_audit(cur, d[1], "login_biometrico", f"usuario:{d[1]}")
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return _mad_json({"token": token_completo, "siguiente": "ok", "usuario": {
+        "nombre": d[2], "usuario": usuario, "rol": d[3], "proveedor_id": d[4]}})
+
 
 
 # ── Primer ingreso: cambiar la clave temporal ──
@@ -1405,9 +1465,9 @@ def asignar_doctor_empresa(solicitud_id, proveedor_id, empresa_id, usuario_id):
         if tipo_doc not in (tipo, 'AMBOS'):
             conn.rollback()
             return {'status': 'error', 'mensaje': 'Ese doctor no atiende este tipo de servicio'}
-        if estado_doc != 'disponible':
+        if estado_doc not in ('disponible', 'desconectado'):
             conn.rollback()
-            return {'status': 'error', 'mensaje': 'Ese doctor no está disponible en línea (debe estar conectado y libre)'}
+            return {'status': 'error', 'mensaje': 'Ese doctor está atendiendo u ocupado con otra solicitud'}
 
         cur.execute("""UPDATE solicitudes
                        SET estado = 'asignado', proveedor_id = %s, asignado_en = NOW(), empresa_aceptada_en = NULL
@@ -1668,7 +1728,8 @@ def handle_buscar_proveedor(request, solicitud_id):
 # ═════════════════════════════════════════════════════════════
 def _servir_html(nombre):
     with open(os.path.join(BASE_DIR, "static", nombre), "r", encoding="utf-8") as f:
-        return (f.read(), 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"})
+        html = f.read().replace("__BASE_URL__", _base_url())
+    return (html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"})
 
 
 def handle_servir_tracking(request, tracking_token=None):
@@ -1925,6 +1986,60 @@ def handle_novedad_doctor(request, solicitud_id):
     return (json.dumps({"ok": True, "icono": icono, "texto": texto}, ensure_ascii=False), 200, HEADERS)
 
 
+# ── Mensajes del cliente al doctor (desde la página de seguimiento) ──
+MAD_MSG_CLIENTE_MAX = 20            # por servicio
+MAD_MSG_CLIENTE_INTERVALO_SEG = 10
+MAD_MSG_CLIENTE_LARGO = 200
+
+
+def _listar_mensajes_cliente(cur, solicitud_id, limite=10):
+    cur.execute("""
+        SELECT id, texto, creado_en FROM (
+            SELECT id, texto, creado_en FROM solicitudes_mensajes_cliente
+            WHERE solicitud_id = %s ORDER BY id DESC LIMIT %s
+        ) t ORDER BY id
+    """, (solicitud_id, limite))
+    return [{"id": i, "texto": t, "creado_en": _iso(c)} for i, t, c in cur.fetchall()]
+
+
+@con_log_errores
+def handle_mensaje_cliente(request, tracking_token):
+    """El cliente escribe al doctor asignado mientras el servicio está en curso."""
+    if not _uuid_valido(tracking_token):
+        return _err("Enlace inválido", 404)
+    data = request.get_json(force=True, silent=True) or {}
+    texto = re.sub(r"[\x00-\x1f\x7f]+", " ", str(data.get("texto") or ""))
+    texto = re.sub(r"\s+", " ", texto).strip()[:MAD_MSG_CLIENTE_LARGO]
+    if len(texto) < 2:
+        return _err("Escribe tu mensaje")
+
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, estado, proveedor_id, tipo_servicio FROM solicitudes WHERE tracking_token = %s FOR UPDATE",
+                    (tracking_token,))
+        row = cur.fetchone()
+        if not row:
+            return _err("No encontrado", 404)
+        sid, estado, pid, tipo = row
+        if estado not in ESTADOS_NOVEDAD or not pid:
+            return _err("Ya no puedes escribir al doctor en este servicio", 409)
+        cur.execute("""SELECT COUNT(*), COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(creado_en))), 9999)
+                       FROM solicitudes_mensajes_cliente WHERE solicitud_id = %s""", (sid,))
+        total, seg = cur.fetchone()
+        if total >= MAD_MSG_CLIENTE_MAX:
+            return _err("Llegaste al límite de mensajes para este servicio. Puedes llamar al doctor.", 429)
+        if seg < MAD_MSG_CLIENTE_INTERVALO_SEG:
+            return _err("Espera unos segundos antes de enviar otro mensaje", 429)
+        cur.execute("INSERT INTO solicitudes_mensajes_cliente (solicitud_id, texto) VALUES (%s, %s)", (sid, texto))
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+    # El aviso no lleva el contenido (puede incluir datos del paciente)
+    enviar_push_proveedor(pid, "Mensaje del cliente", "Abre la app para leerlo.", tag="mensaje")
+    return (json.dumps({"ok": True}), 200, HEADERS)
+
+
 @con_log_errores
 def obtener_estado_tracking(tracking_token):
     if not _uuid_valido(tracking_token):
@@ -1959,6 +2074,7 @@ def obtener_estado_tracking(tracking_token):
         if estado in ('asignado', 'en_camino') and dist_m is not None:
             eta_min = _calcular_eta_min(cur, dist_m, estado)
         novedades = _listar_novedades(cur, sol_id) if estado in ESTADOS_NOVEDAD else []
+        mis_mensajes = _listar_mensajes_cliente(cur, sol_id) if estado in ESTADOS_NOVEDAD else []
     finally:
         cur.close(); conn.close()
 
@@ -1974,6 +2090,8 @@ def obtener_estado_tracking(tracking_token):
         'proveedor_cmp': prov_cmp if hay_doctor else None,
         'proveedor_empresa': prov_empresa if hay_doctor else None,
         'novedades': novedades,
+        'mis_mensajes': mis_mensajes,
+        'puede_escribir': estado in ESTADOS_NOVEDAD,
         'empresa_confirmo': bool(empresa_confirmo) and estado == 'buscando_proveedor',
         'eta_min': eta_min,
         'distancia_km': round(float(dist_m) / 1000, 1) if (dist_m is not None and hay_doctor) else None,
@@ -2449,6 +2567,7 @@ def handle_estado_actual_proveedor(request, proveedor_id):
                 "paciente_dni": p_dni, "paciente_edad": p_edad,
                 "sintomas": p_sintomas, "antecedentes": p_antec, "alergias": p_alergias,
                 "copago_monto": float(p_copago) if p_copago is not None else None, "forma_pago": p_forma,
+                "mensajes_cliente": _listar_mensajes_cliente(cur, sol_id) if estado in ESTADOS_NOVEDAD else [],
             }
     finally:
         cur.close(); conn.close()
@@ -3851,14 +3970,15 @@ def handle_mad_empresa_ofertas(request):
         for r in cur.fetchall():
             cur.execute("""
                 SELECT p.id, p.nombre, pe.estado,
-                       CASE WHEN pe.ubicacion IS NULL THEN NULL
+                       CASE WHEN pe.ubicacion IS NULL OR pe.estado <> 'disponible' THEN NULL
                             ELSE ST_Distance(pe.ubicacion, (SELECT origen::geography FROM solicitudes WHERE id = %s)) END
                 FROM proveedores p LEFT JOIN proveedores_estado pe ON pe.proveedor_id = p.id
                 WHERE p.empresa_id = %s AND p.tipo_servicio IN (%s, 'AMBOS')
-                  AND pe.estado = 'disponible'
-                ORDER BY 4 NULLS LAST
+                  AND pe.estado IN ('disponible', 'desconectado')
+                ORDER BY (pe.estado = 'disponible') DESC, 4 NULLS LAST
             """, (r[0], eid, r[1]))
-            docs = [{"id": d[0], "nombre": d[1], "km": round(d[3] / 1000, 1) if d[3] is not None else None}
+            docs = [{"id": d[0], "nombre": d[1], "en_linea": d[2] == 'disponible',
+                     "km": round(d[3] / 1000, 1) if d[3] is not None else None}
                     for d in cur.fetchall()]
             por_asignar.append({"solicitud_id": r[0], "tipo": r[1], "direccion": r[2], "distrito": r[3],
                                 "referencia": r[4], "programada_para": r[5].isoformat() if r[5] else None,
@@ -4562,6 +4682,10 @@ def mad_router(request, path):
         return handle_mad_totp_iniciar(request)
     if path == "/mad/auth/totp/verificar" and m == "POST":
         return handle_mad_totp_verificar(request)
+    if path == "/mad/auth/biometrico/activar" and m == "POST":
+        return handle_mad_biometrico_activar(request)
+    if path == "/mad/auth/biometrico" and m == "POST":
+        return handle_mad_biometrico_login(request)
     if path == "/mad/auth/logout" and m == "POST":
         return handle_mad_logout(request)
     if path == "/mad/auth/yo" and m == "GET":
@@ -4749,6 +4873,8 @@ def mad_router(request, path):
         if m == "POST":
             x = _entre(path, "/track/", "/cancelar")
             if x: return handle_cancelar_solicitud_cliente(request, x)
+            x = _entre(path, "/track/", "/mensaje")
+            if x: return handle_mensaje_cliente(request, x)
             x = _entre(path, "/track/", "/cambiar-medico")
             if x: return handle_cambiar_medico_cliente(request, x)
             x = _entre(path, "/track/", "/reprogramar")

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Portal de Proveedores · Sanitas</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#ffffff; --ink:#15233b; --muted:#5d6b80; --line:#e2e7ee;
+  --primary:#0a5fa8; --primary-ink:#ffffff; --primary-soft:#e8f1fa;
+  --ok:#17845a; --ok-soft:#e6f5ee; --warn:#a86400; --warn-soft:#fdf2e1;
+  --bad:#b4282e; --bad-soft:#fcebec; --info:#3b5bdb; --info-soft:#edf0fd;
+  --radius:12px; --shadow:0 1px 2px rgba(21,35,59,.06),0 4px 16px rgba(21,35,59,.05);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+a{color:var(--primary)}
+
+/* ── Login ── */
+.auth{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
+.auth-card{width:100%;max-width:400px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:32px 28px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}
+.brand-mark{width:36px;height:36px;border-radius:10px;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700}
+.brand small{display:block;color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+.brand b{font-size:17px}
+h1{font-size:22px;margin:0 0 6px}
+.lead{color:var(--muted);margin:0 0 22px}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+input[type=text],input[type=password],input[type=email],input[type=tel],input[type=date]{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;outline:none}
+input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid transparent;border-radius:9px;padding:10px 16px;font-weight:600;cursor:pointer;background:var(--primary);color:var(--primary-ink);white-space:nowrap}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.block{width:100%;margin-top:20px;padding:12px}
+.btn.ghost{background:transparent;color:var(--primary);border-color:var(--line)}
+.btn.ghost:hover{background:var(--primary-soft)}
+.btn.sm{padding:7px 12px;font-size:13px}
+.msg{margin-top:14px;padding:10px 12px;border-radius:9px;font-size:14px}
+.msg.err{background:var(--bad-soft);color:var(--bad)}
+.msg.ok{background:var(--ok-soft);color:var(--ok)}
+.hint{font-size:12.5px;color:var(--muted);margin-top:6px}
+
+/* ── App ── */
+header.top{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.top-in{max-width:980px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.top-in .brand{margin:0}
+.top-in .spacer{flex:1}
+.who{text-align:right;font-size:13px;line-height:1.25}
+.who b{display:block;font-size:14px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who span{color:var(--muted)}
+main{max-width:980px;margin:0 auto;padding:22px 16px 60px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.summary{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;margin-bottom:18px}
+.ring{--p:0;width:92px;height:92px;border-radius:50%;background:conic-gradient(var(--ok) calc(var(--p)*1%),var(--line) 0);display:grid;place-items:center}
+.ring::after{content:attr(data-label);width:72px;height:72px;border-radius:50%;background:var(--card);display:grid;place-items:center;font-weight:700;font-size:19px}
+.summary h2{margin:0 0 4px;font-size:18px}
+.summary p{margin:0;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip{font-size:12.5px;padding:4px 10px;border-radius:999px;background:var(--bg);color:var(--muted);font-weight:600}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.info{background:var(--info-soft);color:var(--info)}
+.banner{border-radius:var(--radius);padding:12px 16px;margin-bottom:18px;font-size:14px}
+.banner.bad{background:var(--bad-soft);color:var(--bad)}
+.banner.ok{background:var(--ok-soft);color:var(--ok)}
+.section-title{display:flex;align-items:baseline;justify-content:space-between;margin:28px 0 12px}
+.section-title h3{margin:0;font-size:16px}
+.section-title span{color:var(--muted);font-size:13px}
+
+.docs{display:grid;gap:12px}
+.doc{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:2px dashed transparent;transition:border-color .15s}
+.doc.drag{border-color:var(--primary);background:var(--primary-soft)}
+.doc-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.doc-head b{font-size:15px}
+.tag{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:5px;background:var(--bg);color:var(--muted)}
+.tag.req{background:var(--primary-soft);color:var(--primary)}
+.doc-desc{color:var(--muted);font-size:13.5px;margin-top:3px}
+.doc-meta{font-size:12.5px;color:var(--muted);margin-top:8px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.doc-obs{margin-top:10px;background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:8px 10px;font-size:13.5px}
+.doc-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.estado{font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.estado.pendiente{background:var(--bg);color:var(--muted)}
+.estado.en_revision{background:var(--info-soft);color:var(--info)}
+.estado.aprobado{background:var(--ok-soft);color:var(--ok)}
+.estado.observado,.estado.vencido{background:var(--bad-soft);color:var(--bad)}
+.btn-row{display:flex;gap:6px}
+
+.contact{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px}
+.contact .full{grid-column:1/-1;display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:16px}
+
+/* ── Modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(21,35,59,.45);display:grid;place-items:center;padding:16px;z-index:20}
+.modal{background:var(--card);border-radius:16px;width:100%;max-width:440px;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,.2)}
+.modal h3{margin:0 0 4px}
+.file-box{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:9px;display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:14px;word-break:break-all}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.progress{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:14px}
+.progress i{display:block;height:100%;width:0;background:var(--primary);transition:width .2s}
+
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:9px;font-size:14px;z-index:30;max-width:calc(100% - 32px)}
+
+@media (max-width:700px){
+  .who b{max-width:160px}
+  .summary{grid-template-columns:1fr;justify-items:start}
+  .doc{grid-template-columns:1fr}
+  .doc-actions{flex-direction:row;align-items:center;justify-content:space-between}
+  .contact{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ═════════ LOGIN ═════════ -->
+<section id="v-login" class="auth hidden">
+  <form class="auth-card" id="f-login" autocomplete="on">
+    <div class="brand"><div class="brand-mark">S</div><div><small>Sanitas Perú</small><b>Portal de Proveedores</b></div></div>
+    <h1>Ingresa a tu cuenta</h1>
+    <p class="lead">Usa el RUC de tu empresa y la contraseña que te envió el equipo de Compras.</p>
+    <label for="l-ruc">RUC</label>
+    <input id="l-ruc" type="text" inputmode="numeric" maxlength="11" autocomplete="username" required>
+    <label for="l-pass">Contraseña</label>
+    <input id="l-pass" type="password" autocomplete="current-password" required>
+    <button class="btn block" type="submit">Ingresar</button>
+    <div id="l-msg" class="msg err hidden"></div>
+    <p class="hint">¿Olvidaste tu contraseña? Solicita una nueva al equipo de Compras de Sanitas.</p>
+  </form>
+</section>
+
+<!-- ═════════ CAMBIO DE CONTRASEÑA ═════════ -->
+<section id="v-cambio" class="auth hidden">
+  <form class="auth-card" id="f-cambio" autocomplete="off">
+    <div class="brand"><div class="brand-mark">S</div><div><small>Sanitas Perú</small><b>Portal de Proveedores</b></div></div>
+    <h1>Crea tu contraseña</h1>
+    <p class="lead">Por seguridad, reemplaza la contraseña temporal antes de continuar.</p>
+    <label for="c-actual">Contraseña temporal</label>
+    <input id="c-actual" type="password" autocomplete="current-password" required>
+    <label for="c-nueva">Nueva contraseña</label>
+    <input id="c-nueva" type="password" autocomplete="new-password" required>
+    <label for="c-conf">Confirma la nueva contraseña</label>
+    <input id="c-conf" type="password" autocomplete="new-password" required>
+    <p class="hint">Mínimo 8 caracteres, con letras y números.</p>
+    <button class="btn block" type="submit">Guardar y continuar</button>
+    <div id="c-msg" class="msg err hidden"></div>
+  </form>
+</section>
+
+<!-- ═════════ APP ═════════ -->
+<section id="v-app" class="hidden">
+  <header class="top">
+    <div class="top-in">
+      <div class="brand"><div class="brand-mark">S</div><div><small>Sanitas Perú</small><b>Proveedores</b></div></div>
+      <div class="spacer"></div>
+      <div class="who"><b id="a-razon"></b><span id="a-ruc"></span></div>
+      <button class="btn ghost sm" id="b-salir" type="button">Salir</button>
+    </div>
+  </header>
+  <main>
+    <div class="card summary">
+      <div class="ring" id="a-ring" data-label="0%"></div>
+      <div>
+        <h2 id="a-titulo">Tus documentos</h2>
+        <p id="a-sub"></p>
+        <div class="chips" id="a-chips"></div>
+      </div>
+    </div>
+    <div id="a-banner"></div>
+
+    <div class="section-title"><h3>Documentos solicitados</h3><span>PDF, JPG o PNG · máx. <span id="a-max">10</span> MB</span></div>
+    <div class="docs" id="a-docs"></div>
+
+    <div class="section-title"><h3>Datos de contacto</h3><span>Te escribiremos aquí si hay observaciones</span></div>
+    <form class="card contact" id="f-contacto">
+      <div><label for="k-nombre">Persona de contacto</label><input id="k-nombre" type="text" maxlength="150"></div>
+      <div><label for="k-correo">Correo</label><input id="k-correo" type="email" maxlength="150"></div>
+      <div><label for="k-tel">Teléfono</label><input id="k-tel" type="tel" maxlength="30"></div>
+      <div class="full"><span id="k-msg" class="hint"></span><button class="btn sm" type="submit">Guardar contacto</button></div>
+    </form>
+  </main>
+</section>
+
+<!-- ═════════ MODAL SUBIDA ═════════ -->
+<div id="m-subir" class="modal-bg hidden">
+  <form class="modal" id="f-subir">
+    <h3 id="m-titulo">Subir documento</h3>
+    <p class="hint" id="m-desc"></p>
+    <div class="file-box"><span id="m-archivo">—</span><button class="btn ghost sm" type="button" id="m-cambiar">Cambiar</button></div>
+    <div id="m-venc-wrap">
+      <label for="m-venc">Fecha de vencimiento <span id="m-venc-req"></span></label>
+      <input id="m-venc" type="date">
+    </div>
+    <label for="m-emision">Fecha de emisión (opcional)</label>
+    <input id="m-emision" type="date">
+    <div class="progress hidden" id="m-prog"><i></i></div>
+    <div id="m-msg" class="msg err hidden"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" id="m-cancelar">Cancelar</button>
+      <button class="btn" type="submit" id="m-ok">Subir</button>
+    </div>
+  </form>
+</div>
+<input type="file" id="file-picker" accept="application/pdf,image/jpeg,image/png" class="hidden">
+
+<script>
+(function () {
+  "use strict";
+  var API = "/compras/api/proveedor";
+  var KEY = "compras_prov_token";
+  var estado = { token: null, docs: [], maxMb: 10, subida: null };
+
+  var ETIQUETAS = { pendiente: "Pendiente", en_revision: "En revisión", aprobado: "Aprobado", observado: "Observado", vencido: "Vencido" };
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fecha(iso) {
+    if (!iso) return "";
+    var d = new Date(iso.length === 10 ? iso + "T12:00:00" : iso);
+    return d.toLocaleDateString("es-PE", { day: "2-digit", month: "short", year: "numeric" });
+  }
+  function hoyISO() {
+    var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  }
+  function guardarToken(t) {
+    estado.token = t;
+    try { if (t) sessionStorage.setItem(KEY, t); else sessionStorage.removeItem(KEY); } catch (e) { /* sin storage */ }
+  }
+  function leerToken() {
+    try { return sessionStorage.getItem(KEY); } catch (e) { return null; }
+  }
+  function mostrar(vista) {
+    ["v-login", "v-cambio", "v-app"].forEach(function (v) { $(v).classList.toggle("hidden", v !== vista); });
+  }
+  function msg(el, texto, tipo) {
+    el.textContent = texto || "";
+    el.className = "msg " + (tipo || "err") + (texto ? "" : " hidden");
+  }
+  function toast(texto) {
+    var t = document.createElement("div");
+    t.className = "toast"; t.textContent = texto;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 3200);
+  }
+
+  function api(metodo, ruta, cuerpo) {
+    var opts = { method: metodo, headers: {} };
+    if (estado.token) opts.headers.Authorization = "Bearer " + estado.token;
+    if (cuerpo instanceof FormData) opts.body = cuerpo;
+    else if (cuerpo) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(cuerpo); }
+    return fetch(API + ruta, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.status === 401 && ruta !== "/login") { salir(true); throw new Error(d.error || "Sesión expirada"); }
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Error inesperado");
+        return d;
+      });
+    });
+  }
+
+  // ── Login ──
+  $("l-ruc").addEventListener("input", function () { this.value = this.value.replace(/\D/g, "").slice(0, 11); });
+  $("f-login").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var btn = this.querySelector("button"); btn.disabled = true; msg($("l-msg"), "");
+    api("POST", "/login", { ruc: $("l-ruc").value, password: $("l-pass").value })
+      .then(function (d) {
+        guardarToken(d.token); $("l-pass").value = "";
+        if (d.debe_cambiar) mostrar("v-cambio"); else cargar();
+      })
+      .catch(function (e) { msg($("l-msg"), e.message); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // ── Cambio de contraseña ──
+  $("f-cambio").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var nueva = $("c-nueva").value;
+    if (nueva !== $("c-conf").value) { msg($("c-msg"), "Las contraseñas no coinciden"); return; }
+    var btn = this.querySelector("button"); btn.disabled = true; msg($("c-msg"), "");
+    api("POST", "/cambiar-password", { actual: $("c-actual").value, nueva: nueva })
+      .then(function () { this_reset(); toast("Contraseña actualizada"); cargar(); })
+      .catch(function (e) { msg($("c-msg"), e.message); })
+      .finally(function () { btn.disabled = false; });
+    function this_reset() { $("c-actual").value = ""; $("c-nueva").value = ""; $("c-conf").value = ""; }
+  });
+
+  // ── Salir ──
+  function salir(silencioso) {
+    if (estado.token && !silencioso) {
+      fetch(API + "/logout", { method: "POST", headers: { Authorization: "Bearer " + estado.token } }).catch(function () {});
+    }
+    guardarToken(null);
+    mostrar("v-login");
+  }
+  $("b-salir").addEventListener("click", function () { salir(false); });
+
+  // ── Cargar datos ──
+  function cargar() {
+    return api("GET", "/yo").then(function (d) {
+      if (d.debe_cambiar) { mostrar("v-cambio"); return; }
+      estado.docs = d.documentos; estado.maxMb = d.max_archivo_mb || 10;
+      pintar(d); mostrar("v-app");
+    }).catch(function (e) { if (estado.token) toast(e.message); });
+  }
+
+  function pintar(d) {
+    var e = d.empresa, r = d.resumen;
+    $("a-razon").textContent = e.razon_social;
+    $("a-ruc").textContent = "RUC " + e.ruc;
+    $("a-max").textContent = estado.maxMb;
+    $("a-ring").style.setProperty("--p", r.porcentaje);
+    $("a-ring").setAttribute("data-label", r.porcentaje + "%");
+    $("a-titulo").textContent = r.completo ? "Documentación completa" : "Completa tu documentación";
+    $("a-sub").textContent = r.aprobados + " de " + r.obligatorios + " documentos obligatorios aprobados";
+    var chips = [];
+    if (r.pendientes) chips.push('<span class="chip">' + r.pendientes + " pendiente" + (r.pendientes > 1 ? "s" : "") + "</span>");
+    if (r.en_revision) chips.push('<span class="chip info">' + r.en_revision + " en revisión</span>");
+    if (r.observados) chips.push('<span class="chip bad">' + r.observados + " observado" + (r.observados > 1 ? "s" : "") + "</span>");
+    if (r.vencidos) chips.push('<span class="chip bad">' + r.vencidos + " vencido" + (r.vencidos > 1 ? "s" : "") + "</span>");
+    if (r.aprobados) chips.push('<span class="chip ok">' + r.aprobados + " aprobado" + (r.aprobados > 1 ? "s" : "") + "</span>");
+    $("a-chips").innerHTML = chips.join("");
+
+    var banner = "";
+    if (r.observados || r.vencidos) banner = '<div class="banner bad">Tienes documentos observados o vencidos. Revisa el detalle y vuelve a subirlos.</div>';
+    else if (r.completo) banner = '<div class="banner ok">¡Listo! Todos tus documentos obligatorios están aprobados.</div>';
+    $("a-banner").innerHTML = banner;
+
+    $("a-docs").innerHTML = d.documentos.map(function (x, i) {
+      var meta = [];
+      if (x.nombre_archivo) meta.push("📄 " + esc(x.nombre_archivo));
+      if (x.subido_en) meta.push("Subido " + fecha(x.subido_en));
+      if (x.fecha_vencimiento) meta.push((x.estado === "vencido" ? "Venció " : "Vence ") + fecha(x.fecha_vencimiento) + (x.por_vencer ? " · por vencer" : ""));
+      var accion = x.estado === "pendiente" ? "Subir" : (x.estado === "observado" || x.estado === "vencido" ? "Volver a subir" : "Reemplazar");
+      return '<div class="doc" data-i="' + i + '">' +
+        "<div>" +
+          '<div class="doc-head"><b>' + esc(x.nombre) + "</b>" +
+            (x.obligatorio ? '<span class="tag req">Obligatorio</span>' : '<span class="tag">Opcional</span>') + "</div>" +
+          (x.descripcion ? '<div class="doc-desc">' + esc(x.descripcion) + "</div>" : "") +
+          (meta.length ? '<div class="doc-meta">' + meta.map(function (m) { return "<span>" + m + "</span>"; }).join("") + "</div>" : "") +
+          (x.estado === "observado" && x.observacion ? '<div class="doc-obs"><b>Observación:</b> ' + esc(x.observacion) + "</div>" : "") +
+        "</div>" +
+        '<div class="doc-actions">' +
+          '<span class="estado ' + x.estado + '">' + ETIQUETAS[x.estado] + "</span>" +
+          '<div class="btn-row">' +
+            (x.documento_id ? '<button class="btn ghost sm" type="button" data-ver="' + x.documento_id + '">Ver</button>' : "") +
+            '<button class="btn sm' + (x.estado === "aprobado" || x.estado === "en_revision" ? " ghost" : "") + '" type="button" data-subir="' + i + '">' + accion + "</button>" +
+          "</div>" +
+        "</div>" +
+      "</div>";
+    }).join("");
+
+    $("k-nombre").value = e.contacto_nombre || "";
+    $("k-correo").value = e.correo || "";
+    $("k-tel").value = e.telefono || "";
+  }
+
+  // ── Acciones de la lista ──
+  $("a-docs").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    if (b.dataset.ver) {
+      var w = window.open("", "_blank");
+      api("GET", "/documentos/" + b.dataset.ver + "/descargar")
+        .then(function (d) { if (w) w.location = d.url; else window.location = d.url; })
+        .catch(function (e) { if (w) w.close(); toast(e.message); });
+    } else if (b.dataset.subir) {
+      estado.subida = { i: +b.dataset.subir, archivo: null };
+      $("file-picker").value = ""; $("file-picker").click();
+    }
+  });
+  $("a-docs").addEventListener("dragover", function (ev) {
+    var c = ev.target.closest(".doc"); if (!c) return;
+    ev.preventDefault(); c.classList.add("drag");
+  });
+  $("a-docs").addEventListener("dragleave", function (ev) {
+    var c = ev.target.closest(".doc"); if (c) c.classList.remove("drag");
+  });
+  $("a-docs").addEventListener("drop", function (ev) {
+    var c = ev.target.closest(".doc"); if (!c) return;
+    ev.preventDefault(); c.classList.remove("drag");
+    if (ev.dataTransfer.files.length) abrirModal(+c.dataset.i, ev.dataTransfer.files[0]);
+  });
+  $("file-picker").addEventListener("change", function () {
+    if (this.files.length && estado.subida) abrirModal(estado.subida.i, this.files[0]);
+  });
+
+  // ── Modal de subida ──
+  function abrirModal(i, archivo) {
+    var x = estado.docs[i];
+    if (!/^(application\/pdf|image\/jpeg|image\/png)$/.test(archivo.type)) { toast("Formato no permitido. Usa PDF, JPG o PNG."); return; }
+    if (archivo.size > estado.maxMb * 1024 * 1024) { toast("El archivo supera " + estado.maxMb + " MB"); return; }
+    estado.subida = { i: i, archivo: archivo };
+    $("m-titulo").textContent = x.nombre;
+    $("m-desc").textContent = x.descripcion || "";
+    $("m-archivo").textContent = archivo.name + " · " + (archivo.size / 1024 / 1024).toFixed(2) + " MB";
+    $("m-venc-req").textContent = x.requiere_vencimiento ? "*" : "(opcional)";
+    $("m-venc").required = !!x.requiere_vencimiento;
+    $("m-venc").min = hoyISO();
+    $("m-venc").value = "";
+    $("m-emision").max = hoyISO();
+    $("m-emision").value = "";
+    $("m-venc-wrap").classList.toggle("hidden", !x.requiere_vencimiento);
+    $("m-prog").classList.add("hidden");
+    msg($("m-msg"), "");
+    $("m-subir").classList.remove("hidden");
+  }
+  function cerrarModal() { $("m-subir").classList.add("hidden"); estado.subida = null; }
+  $("m-cancelar").addEventListener("click", cerrarModal);
+  $("m-cambiar").addEventListener("click", function () { $("file-picker").value = ""; $("file-picker").click(); });
+  $("f-subir").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var s = estado.subida; if (!s || !s.archivo) return;
+    var x = estado.docs[s.i];
+    var fd = new FormData();
+    fd.append("tipo_id", x.tipo_id);
+    fd.append("archivo", s.archivo, s.archivo.name);
+    if ($("m-venc").value) fd.append("fecha_vencimiento", $("m-venc").value);
+    if ($("m-emision").value) fd.append("fecha_emision", $("m-emision").value);
+
+    var btn = $("m-ok"); btn.disabled = true; msg($("m-msg"), "");
+    $("m-prog").classList.remove("hidden");
+    var barra = $("m-prog").firstElementChild; barra.style.width = "0";
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", API + "/documentos");
+    xhr.setRequestHeader("Authorization", "Bearer " + estado.token);
+    xhr.upload.onprogress = function (e) { if (e.lengthComputable) barra.style.width = Math.round(100 * e.loaded / e.total) + "%"; };
+    xhr.onload = function () {
+      btn.disabled = false;
+      var d = {}; try { d = JSON.parse(xhr.responseText); } catch (e) { /* respuesta no JSON */ }
+      if (xhr.status === 401) { cerrarModal(); salir(true); return; }
+      if (xhr.status >= 200 && xhr.status < 300 && d.ok !== false) {
+        cerrarModal(); toast("Documento enviado a revisión"); cargar();
+      } else {
+        $("m-prog").classList.add("hidden");
+        msg($("m-msg"), d.error || "No se pudo subir el archivo");
+      }
+    };
+    xhr.onerror = function () { btn.disabled = false; $("m-prog").classList.add("hidden"); msg($("m-msg"), "Error de conexión"); };
+    xhr.send(fd);
+  });
+
+  // ── Contacto ──
+  $("f-contacto").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var btn = this.querySelector("button"); btn.disabled = true;
+    $("k-msg").textContent = "";
+    api("POST", "/datos", { contacto_nombre: $("k-nombre").value, correo: $("k-correo").value, telefono: $("k-tel").value })
+      .then(function () { $("k-msg").textContent = "Guardado ✓"; })
+      .catch(function (e) { $("k-msg").textContent = e.message; })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // ── Inicio ──
+  var t = leerToken();
+  if (t) { estado.token = t; cargar().then(function () { if (!document.querySelector("section:not(.hidden)")) mostrar("v-login"); }); }
+  else mostrar("v-login");
+})();
+</script>
+</body>
+</html>
